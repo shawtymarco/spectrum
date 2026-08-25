@@ -17,6 +17,21 @@ Spectrum's protocol uses Spectral, TCP and QUIC instead of RakNet and the standa
 
 ## Usage
 
+### Protocol translation
+
+Spectrum may accept additional `minecraft.Protocol` implementations through
+`minecraft.ListenConfig.AcceptedProtocols`. With the default
+`SyncProtocol: false`, the proxy keeps its backend wire on the current native
+protocol. Packets from a historical client are then decoded and converted to
+native before being sent to a backend, while backend packets decoded by the
+server integration are converted back by the selected client protocol.
+
+Native clients retain the raw packet fast path. Historical clients never use
+that path because their packet layouts cannot safely be forwarded as native
+bytes. The connection request sent to a backend contains the public client's
+actual protocol ID so integrations can select version-specific presentation
+capabilities such as chunk palette mapping.
+
 ### API
 
 Spectrum provides an external TCP service for communication between downstream servers and the proxy through packets. This service supports tasks such as player transfers and kicks and is designed to be extensible, allowing you to register your own packets and handlers.

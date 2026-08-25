@@ -9,6 +9,8 @@ import (
 	"time"
 
 	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
+	"github.com/cooldogedev/spectrum/util"
+	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -161,7 +163,7 @@ func handleClientPacket(s *Session, header *packet.Header, pool packet.Pool, shi
 		return errors.New("failed to decode header")
 	}
 
-	if !slices.Contains(s.opts.ClientDecode, header.PacketID) {
+	if !shouldDecodeClientPacket(s.client.Proto(), s.opts, header.PacketID) {
 		s.Processor().ProcessClientEncoded(ctx, &payload)
 		if !ctx.Cancelled() {
 			return s.Server().Write(payload)
@@ -201,6 +203,17 @@ func handleClientPacket(s *Session, header *packet.Header, pool packet.Pool, shi
 		}
 	}
 	return
+}
+
+// shouldDecodeClientPacket reports whether a client packet must cross the
+// minecraft.Protocol conversion boundary before it is sent to a backend. A
+// historical client cannot use the raw fast path while the backend wire stays
+// native: doing so would forward the historical packet layout unchanged.
+func shouldDecodeClientPacket(proto minecraft.Protocol, opts util.Opts, packetID uint32) bool {
+	if slices.Contains(opts.ClientDecode, packetID) {
+		return true
+	}
+	return !opts.SyncProtocol && proto.ID() != minecraft.DefaultProtocol.ID()
 }
 
 func logError(s *Session, msg string, err error) {
