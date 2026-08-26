@@ -48,6 +48,7 @@ type Session struct {
 	latency    atomic.Int64
 	inFallback atomic.Bool
 	once       sync.Once
+	limiter    packetLimiter
 }
 
 // NewSession creates a new Session instance using the provided minecraft.Conn.
@@ -66,6 +67,7 @@ func NewSession(client *minecraft.Conn, logger *slog.Logger, registry *Registry,
 
 		animation: &animation.Dimension{},
 		tracker:   newTracker(),
+		limiter:   newPacketLimiter(time.Now()),
 	}
 	s.ctx, s.cancelFunc = context.WithCancelCause(client.Context())
 	s.cache.Store([]byte(nil))

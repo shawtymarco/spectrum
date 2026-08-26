@@ -117,6 +117,11 @@ loop:
 
 		backend := s.Server()
 		if err := handleClientPacket(s, backend, header, pool, shieldID, payload); err != nil {
+			if errors.Is(err, errClientPacketRateLimited) {
+				s.logger.Warn("disconnecting rate-limited client", "err", err)
+				s.CloseWithError(err)
+				break loop
+			}
 			current, backendAddr := s.backendIsCurrent(backend)
 			if !current {
 				// A transfer may retire the backend while a client packet write is
@@ -207,6 +212,9 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 	}
 
 	for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
+		if err := s.limiter.allow(latest, time.Now()); err != nil {
+			return err
+		}
 		s.Processor().ProcessClient(ctx, &latest)
 		if ctx.Cancelled() {
 			break
