@@ -9,10 +9,20 @@ import (
 
 	"github.com/cooldogedev/spectrum/server"
 	"github.com/cooldogedev/spectrum/util"
+	"github.com/sandertv/gophertunnel/minecraft"
 )
 
 type testTransport struct {
 	dial func(context.Context, string) (io.ReadWriteCloser, error)
+}
+
+type failingDiscovery struct {
+	err error
+}
+
+func (f failingDiscovery) Discover(*minecraft.Conn) (string, error) { return "", f.err }
+func (f failingDiscovery) DiscoverFallback(*minecraft.Conn) (string, error) {
+	return "", f.err
 }
 
 func (t testTransport) Dial(ctx context.Context, addr string) (io.ReadWriteCloser, error) {
@@ -98,5 +108,21 @@ func TestBackendIsCurrentRejectsRetiredConnection(t *testing.T) {
 	}
 	if ok, addr := s.backendIsCurrent(retired); ok || addr != "bedwars:19143" {
 		t.Fatalf("retired backend = (%v, %q), want (false, bedwars:19143)", ok, addr)
+	}
+}
+
+func TestFallbackReleasesGuardAfterSynchronousFailure(t *testing.T) {
+	expected := errors.New("discovery unavailable")
+	s := &Session{discovery: failingDiscovery{err: expected}, processor: NopProcessor{}}
+	s.ctx, s.cancelFunc = context.WithCancelCause(context.Background())
+
+	for attempt := 0; attempt < 2; attempt++ {
+		err := s.fallback()
+		if !errors.Is(err, expected) {
+			t.Fatalf("fallback attempt %d error = %v, want %v", attempt+1, err, expected)
+		}
+		if s.inFallback.Load() {
+			t.Fatalf("fallback attempt %d retained the in-progress guard", attempt+1)
+		}
 	}
 }

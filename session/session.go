@@ -50,6 +50,8 @@ type Session struct {
 	once       sync.Once
 }
 
+var errFallbackInProgress = errors.New("fallback already in progress")
+
 // NewSession creates a new Session instance using the provided minecraft.Conn.
 func NewSession(client *minecraft.Conn, logger *slog.Logger, registry *Registry, discovery server.Discovery, opts util.Opts, transport transport.Transport) *Session {
 	s := &Session{
@@ -176,6 +178,7 @@ func (s *Session) TransferContext(ctx context.Context, addr string) (err error) 
 
 	conn.OnConnect(func(err error) {
 		if err != nil {
+			s.inFallback.Store(false)
 			s.Processor().ProcessTransferFailure(NewContext(), &origin, &addr, err)
 			return
 		}
@@ -184,6 +187,7 @@ func (s *Session) TransferContext(ctx context.Context, addr string) (err error) 
 		s.animation.Play(s.client, gameData)
 		s.sendGameData(conn.GameData())
 		if err := conn.DoSpawn(); err != nil {
+			s.inFallback.Store(false)
 			s.Processor().ProcessTransferFailure(NewContext(), &origin, &addr, err)
 			return
 		}
@@ -325,7 +329,7 @@ func (s *Session) dial(ctx context.Context, addr string) (*server.Conn, error) {
 }
 
 // fallback attempts to transfer the session to a fallback server provided by the discovery.
-func (s *Session) fallback() error {
+func (s *Session) fallback() (err error) {
 	select {
 	case <-s.ctx.Done():
 		return context.Cause(s.ctx)
@@ -333,8 +337,15 @@ func (s *Session) fallback() error {
 	}
 
 	if !s.inFallback.CompareAndSwap(false, true) {
-		return errors.New("already in fallback")
+		return errFallbackInProgress
 	}
+	// Synchronous discovery/dial/setup failures never reach the connection's
+	// OnConnect callback, so release the guard here and allow a later retry.
+	defer func() {
+		if err != nil {
+			s.inFallback.Store(false)
+		}
+	}()
 
 	s.serverMu.RLock()
 	origin := s.serverAddr
