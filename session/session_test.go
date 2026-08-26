@@ -87,3 +87,16 @@ func TestDialRejectsEmptyAddress(t *testing.T) {
 		t.Fatal("transport dialed an empty address")
 	}
 }
+
+func TestBackendIsCurrentRejectsRetiredConnection(t *testing.T) {
+	retired := new(server.Conn)
+	current := new(server.Conn)
+	s := &Session{serverConn: current, serverAddr: "bedwars:19143"}
+
+	if ok, addr := s.backendIsCurrent(current); !ok || addr != "bedwars:19143" {
+		t.Fatalf("current backend = (%v, %q), want (true, bedwars:19143)", ok, addr)
+	}
+	if ok, addr := s.backendIsCurrent(retired); ok || addr != "bedwars:19143" {
+		t.Fatalf("retired backend = (%v, %q), want (false, bedwars:19143)", ok, addr)
+	}
+}

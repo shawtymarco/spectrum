@@ -252,6 +252,14 @@ func (s *Session) Server() *server.Conn {
 	return s.serverConn
 }
 
+// backendIsCurrent reports whether conn is still the active backend and
+// returns the active backend address from the same lock snapshot.
+func (s *Session) backendIsCurrent(conn *server.Conn) (bool, string) {
+	s.serverMu.RLock()
+	defer s.serverMu.RUnlock()
+	return s.serverConn == conn, s.serverAddr
+}
+
 // Context returns the connection's context. The context is canceled when the session is closed,
 // allowing for cancellation of operations that are tied to the lifecycle of the session.
 func (s *Session) Context() context.Context {

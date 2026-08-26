@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	spectrumserver "github.com/cooldogedev/spectrum/server"
 	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
 	"github.com/cooldogedev/spectrum/util"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -28,10 +29,13 @@ loop:
 		server := s.Server()
 		pk, err := server.ReadPacket()
 		if err != nil {
-			if server != s.Server() {
+			current, backendAddr := s.backendIsCurrent(server)
+			if !current {
+				s.logger.Debug("retired backend stream closed during transfer", "err", err)
 				continue loop
 			}
 
+			s.logger.Warn("active backend stream read failed; attempting fallback", "backend", backendAddr, "err", err)
 			server.CloseWithError(fmt.Errorf("failed to read packet from server: %w", err))
 			if err := s.fallback(); err != nil {
 				s.CloseWithError(fmt.Errorf("fallback failed: %w", err))
@@ -111,8 +115,18 @@ loop:
 			break loop
 		}
 
-		if err := handleClientPacket(s, header, pool, shieldID, payload); err != nil {
-			s.Server().CloseWithError(fmt.Errorf("failed to write packet to server: %w", err))
+		backend := s.Server()
+		if err := handleClientPacket(s, backend, header, pool, shieldID, payload); err != nil {
+			current, backendAddr := s.backendIsCurrent(backend)
+			if !current {
+				// A transfer may retire the backend while a client packet write is
+				// already in flight. Never close the newly published backend for an
+				// error returned by that old stream.
+				s.logger.Debug("ignored client write failure from retired backend", "err", err)
+				continue loop
+			}
+			s.logger.Error("active backend client write failed", "backend", backendAddr, "err", err)
+			backend.CloseWithError(fmt.Errorf("failed to write packet to server: %w", err))
 		}
 	}
 }
@@ -156,7 +170,7 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 }
 
 // handleClientPacket processes and forwards the provided packet from the client to the server.
-func handleClientPacket(s *Session, header *packet.Header, pool packet.Pool, shieldID int32, payload []byte) (err error) {
+func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet.Header, pool packet.Pool, shieldID int32, payload []byte) (err error) {
 	ctx := NewContext()
 	buf := bytes.NewBuffer(payload)
 	if err := header.Read(buf); err != nil {
@@ -166,7 +180,7 @@ func handleClientPacket(s *Session, header *packet.Header, pool packet.Pool, shi
 	if !shouldDecodeClientPacket(s.client.Proto(), s.opts, header.PacketID) {
 		s.Processor().ProcessClientEncoded(ctx, &payload)
 		if !ctx.Cancelled() {
-			return s.Server().Write(payload)
+			return backend.Write(payload)
 		}
 		return
 	}
@@ -189,7 +203,7 @@ func handleClientPacket(s *Session, header *packet.Header, pool packet.Pool, shi
 		if ctx.Cancelled() {
 			return
 		}
-		return s.Server().WritePacket(pk)
+		return backend.WritePacket(pk)
 	}
 
 	for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
@@ -198,7 +212,7 @@ func handleClientPacket(s *Session, header *packet.Header, pool packet.Pool, shi
 			break
 		}
 
-		if err := s.Server().WritePacket(latest); err != nil {
+		if err := backend.WritePacket(latest); err != nil {
 			return err
 		}
 	}
