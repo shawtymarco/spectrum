@@ -117,11 +117,6 @@ loop:
 
 		backend := s.Server()
 		if err := handleClientPacket(s, backend, header, pool, shieldID, payload); err != nil {
-			if errors.Is(err, errClientPacketRateLimited) {
-				s.logger.Warn("disconnecting rate-limited client", "err", err)
-				s.CloseWithError(err)
-				break loop
-			}
 			current, backendAddr := s.backendIsCurrent(backend)
 			if !current {
 				// A transfer may retire the backend while a client packet write is
@@ -181,6 +176,9 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 	if err := header.Read(buf); err != nil {
 		return errors.New("failed to decode header")
 	}
+	if shouldDiscardClientPacket(s.opts, header.PacketID) {
+		return nil
+	}
 
 	if !shouldDecodeClientPacket(s.client.Proto(), s.opts, header.PacketID) {
 		s.Processor().ProcessClientEncoded(ctx, &payload)
@@ -212,9 +210,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 	}
 
 	for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
-		if err := s.limiter.allow(latest, time.Now()); err != nil {
-			return err
-		}
 		s.Processor().ProcessClient(ctx, &latest)
 		if ctx.Cancelled() {
 			break
@@ -225,6 +220,10 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		}
 	}
 	return
+}
+
+func shouldDiscardClientPacket(opts util.Opts, packetID uint32) bool {
+	return slices.Contains(opts.ClientDiscard, packetID)
 }
 
 // shouldDecodeClientPacket reports whether a client packet must cross the

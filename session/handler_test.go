@@ -39,3 +39,13 @@ func TestShouldDecodeClientPacket(t *testing.T) {
 		})
 	}
 }
+
+func TestConfiguredClientDiscardPrecedesDecode(t *testing.T) {
+	opts := util.Opts{ClientDiscard: []uint32{175}, ClientDecode: []uint32{175}}
+	if !shouldDiscardClientPacket(opts, 175) {
+		t.Fatal("configured client discard was ignored")
+	}
+	if shouldDiscardClientPacket(opts, 174) {
+		t.Fatal("unconfigured client packet was discarded")
+	}
+}
