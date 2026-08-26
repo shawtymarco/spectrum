@@ -182,8 +182,12 @@ func (c *Conn) DoConnect() error {
 	}
 
 	err = c.WritePacket(&spectrumpacket.ConnectionRequest{
-		Addr:         c.client.RemoteAddr().String(),
-		ProtocolID:   c.protocol.ID(),
+		Addr: c.client.RemoteAddr().String(),
+		// The backend wire may deliberately remain native while the public
+		// client uses a historical protocol. Forward the selected client
+		// protocol so a backend can choose presentation capabilities such as
+		// Dragonfly's chunk palette mapper without changing its wire codec.
+		ProtocolID:   c.client.Proto().ID(),
 		ClientData:   clientData,
 		IdentityData: identityData,
 		Cache:        c.cache,

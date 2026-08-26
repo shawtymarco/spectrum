@@ -8,6 +8,9 @@ type Opts struct {
 	AutoLogin bool `yaml:"auto_login"`
 	// ClientDecode is a list of client packet identifiers that need to be decoded by the proxy.
 	ClientDecode []uint32 `yaml:"client_decode"`
+	// ClientDiscard is a list of client packet identifiers discarded after the
+	// header is read but before their payload is decoded or forwarded.
+	ClientDiscard []uint32 `yaml:"client_discard"`
 	// LatencyInterval is the interval at which the latency of the connection is updated in milliseconds.
 	// Lower intervals provide more accurate latency but use more bandwidth.
 	LatencyInterval int64 `yaml:"latency_interval"`

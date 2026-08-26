@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -251,6 +252,14 @@ func (s *Session) Server() *server.Conn {
 	return s.serverConn
 }
 
+// backendIsCurrent reports whether conn is still the active backend and
+// returns the active backend address from the same lock snapshot.
+func (s *Session) backendIsCurrent(conn *server.Conn) (bool, string) {
+	s.serverMu.RLock()
+	defer s.serverMu.RUnlock()
+	return s.serverConn == conn, s.serverAddr
+}
+
 // Context returns the connection's context. The context is canceled when the session is closed,
 // allowing for cancellation of operations that are tied to the lifecycle of the session.
 func (s *Session) Context() context.Context {
@@ -291,20 +300,27 @@ func (s *Session) dial(ctx context.Context, addr string) (*server.Conn, error) {
 		return nil, context.Cause(s.ctx)
 	default:
 	}
-
-	s.serverMu.Lock()
-	defer s.serverMu.Unlock()
-	if s.serverConn != nil {
-		_ = s.serverConn.Close()
+	if strings.TrimSpace(addr) == "" {
+		return nil, errors.New("server address is empty")
 	}
 
-	conn, err := s.transport.Dial(ctx, addr)
+	transportConn, err := s.transport.Dial(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
-	c := server.NewConn(conn, s.client, s.logger.With("addr", addr), s.opts.SyncProtocol, s.Cache())
+	c := server.NewConn(transportConn, s.client, s.logger.With("addr", addr), s.opts.SyncProtocol, s.Cache())
+
+	// Publish the replacement before closing the previous backend. The server
+	// read loop uses this pointer change to distinguish an intentional transfer
+	// from a backend failure that should trigger fallback.
+	s.serverMu.Lock()
+	previous := s.serverConn
 	s.serverAddr = addr
 	s.serverConn = c
+	s.serverMu.Unlock()
+	if previous != nil {
+		_ = previous.Close()
+	}
 	return c, nil
 }
 
@@ -328,6 +344,11 @@ func (s *Session) fallback() error {
 	if err != nil {
 		s.Processor().ProcessFallbackFailure(processorCtx, &origin, nil, err)
 		return fmt.Errorf("discovery failed: %w", err)
+	}
+	if strings.TrimSpace(addr) == "" {
+		err := errors.New("no fallback server configured")
+		s.Processor().ProcessFallbackFailure(processorCtx, &origin, &addr, err)
+		return err
 	}
 
 	s.Processor().ProcessPreFallback(processorCtx, &origin, &addr)

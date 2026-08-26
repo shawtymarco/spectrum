@@ -1,51 +1,71 @@
-# Spectrum
+<p align="center">
+  <img src="assets/go-gopher.png" alt="Go gopher" width="180">
+</p>
 
-Spectrum is a blazingly fast, lightweight, and easy to use Minecraft: Bedrock Edition proxy.
+<h1 align="center">Spectrum</h1>
 
-[![Discord](https://img.shields.io/discord/1225942695604912279.svg?label=discord&color=7289DA&logo=discord&style=for-the-badge)](https://discord.com/invite/9TPKfeKvK2)
+<p align="center">A fast Minecraft Bedrock proxy with native-backend multiversion support.</p>
 
-## Examples
+## ✅ Supported Versions
 
-Explore how to use Spectrum in the [example](example) directory.
+This maintained fork keeps the backend wire native and accepts the verified
+`go-multiversion` adapters below.
 
-## Implementations
+| Protocol ID | Minecraft version | Path | BRBW automated E2E |
+|------------:|-------------------|------|:------------------:|
+| 2169 | 1.26.45 | Native gophertunnel | ✅ |
+| 2168 | 1.26.40-1.26.44 | `go-multiversion/v1_26_44` | ✅ |
+| 1001 | 1.26.30-1.26.34, 1.26.36 | `go-multiversion/v1_26_30` | ✅ |
+| 975 | 1.26.20, 1.26.21, 1.26.23 | `go-multiversion/v1_26_20` | ✅ |
+| 844 | 1.21.110-1.21.114 | `go-multiversion/v1_21_110` | ✅ |
+| 827 | 1.21.100-1.21.102 | `go-multiversion/v1_21_100` | ✅ |
+| 486 | 1.18.10-1.18.12 | `go-multiversion/v1_18_10` | ✅ |
 
-Spectrum's protocol uses Spectral, TCP and QUIC instead of RakNet and the standard Minecraft protocol, providing better reliability and performance. Check out compatible implementations:
+> [!NOTE]
+> Version coverage is explicit. Unlisted releases and previews are not implied.
 
-- [Dragonfly](https://github.com/cooldogedev/spectrum-df)
-- [PocketMine-MP](https://github.com/cooldogedev/spectrum-pm)
+## 🚀 Usage
 
-## Usage
+Pass registry-aware historical protocols to the public listener and keep
+`SyncProtocol` disabled so backends always speak the current native model:
 
-### API
+```go
+opts := spectrumutil.DefaultOpts()
+opts.Addr = ":19132"
 
-Spectrum provides an external TCP service for communication between downstream servers and the proxy through packets. This service supports tasks such as player transfers and kicks and is designed to be extensible, allowing you to register your own packets and handlers.
+proxy := spectrum.NewSpectrum(
+	spectrumserver.NewStaticDiscovery("dragonfly:19142", ""),
+	slog.Default(),
+	opts,
+	nil,
+)
 
-For a practical example, see the [example API implementation](example/api.go). Official implementations include an API client for easy integration. If you’re using Go, you can use the [Dial](api/dial.go) function from the API package to dial an API service.
+err := proxy.Listen(minecraft.ListenConfig{
+	AcceptedProtocols: protocols,
+	StatusProvider:    spectrumutil.NewStatusProvider("Example", "Spectrum"),
+})
+```
 
-### Discovery
+Native clients retain raw packet forwarding. Historical clients automatically
+cross the bidirectional `minecraft.Protocol` conversion boundary, and the
+backend connection request carries the public client's real protocol ID.
 
-Spectrum introduces Discovery, a method for server determination when players join. It handles connections asynchronously, determining the server address for connection or signaling disconnection errors. This process allows for blocking operations like database queries and HTTP requests. In addition, Spectrum offers an in-built static discovery that maintains a constant server address. Furthermore, the discovery feature can also function as a server load balancer.
+## 🔗 Dependencies
 
-### Processor
+- [`shawtymarco/gophertunnel`](https://github.com/shawtymarco/gophertunnel)
+  provides the native protocol model and the protocol-486 RakNet v10 transport.
+- [`shawtymarco/go-multiversion`](https://github.com/shawtymarco/go-multiversion)
+  provides historical wire, registry, item, form, and gameplay conversion.
+- [`shawtymarco/spectrum-df`](https://github.com/shawtymarco/spectrum-df)
+  connects native Spectrum streams to Dragonfly and preserves client protocol
+  capabilities for chunk encoding.
+- [`cooldogedev/spectral`](https://github.com/cooldogedev/spectral) provides the
+  default multiplexed backend transport. QUIC is also available.
 
-The `Processor` interface in Spectrum handles incoming and outgoing packets within sessions, enabling custom filtering and manipulation. This functionality supports implementing anti-cheat measures and other security features. Downstream servers are responsible for prefixing packets to indicate decoding necessity, as per Spectrum protocol specifications.
+## 🙏 Credits
 
-## Why Spectrum?
-- **Protocol Innovation**: Utilizes [Spectral](https://github.com/cooldogedev/spectral) and [QUIC](https://datatracker.ietf.org/doc/html/rfc9000) for enhanced reliability and performance, unlike traditional proxies relying on RakNet and standard Minecraft protocol.
-
-- **Efficient Packet Handling**: Maintains high throughput by bypassing unnecessary packet decoding, optimizing data transmission and reducing latency.
-
-- **Customizability**: Provides extensive customization options, including defining transfer transitions and custom behaviors, for unique gameplay experiences.
-
-- **Lightweight and Fast**: Built for high performance with a lightweight architecture, capable of handling various connection loads efficiently.
-
-- **Stateless**: Simplifies scalability with a stateless design, enhancing flexibility and efficiency in server management by not keeping track of registered servers within the proxy. Transfer between servers is as easy as sending Spectrum's transfer packet to the player from downstream servers.
-
-- **Deterministic**: Takes a unique approach by sidestepping entity translations altogether, relying solely on deterministic entity identifiers provided by the downstream servers.
-
-## Additional Notes
-- **Kernel Network Buffer Tuning (Linux):** Under high load or on systems with conservative default settings, the standard Linux kernel network buffer sizes may be insufficient to handle incoming traffic and will cause the proxy to throw errors or disconnect randomly. Example commands provided below show how to increase these buffer sizes to ~7.5MB (adjust to your needs):
-  - `sysctl -w net.core.rmem_max=7500000`
-  - `sysctl -w net.core.wmem_max=7500000`
-  - `sysctl -w net.ipv4.tcp_rmem="4096 87380 7500000"`
+- [cooldogedev/Spectrum](https://github.com/cooldogedev/spectrum)
+- [Sandertv/gophertunnel](https://github.com/Sandertv/gophertunnel)
+- [df-mc/dragonfly](https://github.com/df-mc/dragonfly)
+- [Go gopher](https://go.dev/blog/gopher) by Renee French, used under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
