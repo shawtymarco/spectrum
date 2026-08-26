@@ -38,6 +38,10 @@ loop:
 			s.logger.Warn("active backend stream read failed; attempting fallback", "backend", backendAddr, "err", err)
 			server.CloseWithError(fmt.Errorf("failed to read packet from server: %w", err))
 			if err := s.fallback(); err != nil {
+				if errors.Is(err, errFallbackInProgress) {
+					s.logger.Debug("backend fallback is already in progress")
+					continue loop
+				}
 				s.CloseWithError(fmt.Errorf("fallback failed: %w", err))
 				break loop
 			}
