@@ -46,3 +46,14 @@ func TestBackendReadyStartsAuthoritativeStreaming(t *testing.T) {
 		t.Fatal("duplicate ready marker was accepted")
 	}
 }
+
+func TestReadyTimeoutCoversStreamingPhase(t *testing.T) {
+	backend := new(server.Conn)
+	s := &Session{ready: &readyTransfer{backend: backend, phase: readyTransferStreaming}}
+	if !s.expireReadyTransfer(backend) {
+		t.Fatal("streaming transfer was not expired")
+	}
+	if s.ready != nil {
+		t.Fatal("expired transfer remained installed")
+	}
+}

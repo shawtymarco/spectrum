@@ -242,7 +242,7 @@ func (s *Session) transferContext(ctx context.Context, addr string, waitForReady
 func (s *Session) installReadyTransfer(backend *server.Conn, origin, target string, data minecraft.GameData) {
 	state := &readyTransfer{backend: backend, origin: origin, target: target, data: data, phase: readyTransferWaiting}
 	state.timer = time.AfterFunc(backendReadyTimeout, func() {
-		if !s.takeReadyTransfer(backend, readyTransferWaiting) {
+		if !s.expireReadyTransfer(backend) {
 			return
 		}
 		backend.CloseWithError(fmt.Errorf("backend ready timeout after %s", backendReadyTimeout))
@@ -304,10 +304,10 @@ func (s *Session) completeReadyTransfer(backend *server.Conn) {
 	s.logger.Debug("transferred ready session", "origin", state.origin, "target", state.target)
 }
 
-func (s *Session) takeReadyTransfer(backend *server.Conn, phase readyTransferPhase) bool {
+func (s *Session) expireReadyTransfer(backend *server.Conn) bool {
 	s.readyMu.Lock()
 	defer s.readyMu.Unlock()
-	if s.ready == nil || s.ready.backend != backend || s.ready.phase != phase {
+	if s.ready == nil || s.ready.backend != backend {
 		return false
 	}
 	s.ready = nil
