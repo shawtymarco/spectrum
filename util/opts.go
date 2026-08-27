@@ -8,6 +8,10 @@ type Opts struct {
 	AutoLogin bool `yaml:"auto_login"`
 	// ClientDecode is a list of client packet identifiers that need to be decoded by the proxy.
 	ClientDecode []uint32 `yaml:"client_decode"`
+	// ClientTrace is a list of native client packet identifiers inspected from
+	// a copy while their original encoded payload retains the raw fast path.
+	// The processor may request an internal trace for selected packet values.
+	ClientTrace []uint32 `yaml:"client_trace"`
 	// ClientDiscard is a list of client packet identifiers discarded after the
 	// header is read but before their payload is decoded or forwarded.
 	ClientDiscard []uint32 `yaml:"client_discard"`

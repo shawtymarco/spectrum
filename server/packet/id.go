@@ -8,4 +8,6 @@ const (
 	IDTransfer
 	IDUpdateCache
 	IDBackendReady
+	IDTracedPacket
+	IDTraceResult
 )

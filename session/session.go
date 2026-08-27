@@ -50,9 +50,16 @@ type Session struct {
 	latency    atomic.Int64
 	inFallback atomic.Bool
 	once       sync.Once
+
+	tracePrefix      uint64
+	traceSequence    atomic.Uint64
+	traceAckSequence atomic.Uint64
+	traceAckMu       sync.Mutex
+	traceAcks        map[int64]pendingTraceAck
 }
 
 var errFallbackInProgress = errors.New("fallback already in progress")
+var nextTracePrefix atomic.Uint64
 
 const backendReadyTimeout = 15 * time.Second
 
@@ -86,8 +93,10 @@ func NewSession(client *minecraft.Conn, logger *slog.Logger, registry *Registry,
 
 		processor: NopProcessor{},
 
-		animation: &animation.Dimension{},
-		tracker:   newTracker(),
+		animation:   &animation.Dimension{},
+		tracker:     newTracker(),
+		tracePrefix: nextTracePrefix.Add(1),
+		traceAcks:   make(map[int64]pendingTraceAck),
 	}
 	s.ctx, s.cancelFunc = context.WithCancelCause(client.Context())
 	s.cache.Store([]byte(nil))

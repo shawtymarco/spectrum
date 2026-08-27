@@ -21,6 +21,7 @@ import (
 const (
 	packetDecodeNeeded = byte(iota)
 	packetDecodeNotNeeded
+	packetTraceVersion = 1
 )
 
 var bufferPool = sync.Pool{
@@ -156,6 +157,35 @@ func (c *Conn) WritePacket(pk packet.Packet) error {
 	}
 	pk.Marshal(c.protocol.NewWriter(buf, c.shieldID))
 	return c.writer.Write(snappy.Encode(nil, buf.Bytes()))
+}
+
+// WriteTraced writes an already encoded native Bedrock packet in one internal
+// trace envelope. The single framed write prevents unrelated control packets
+// from being interleaved between the trace metadata and its packet.
+func (c *Conn) WriteTraced(payload []byte, traceID uint64) error {
+	return c.WritePacket(&spectrumpacket.TracedPacket{
+		Version: packetTraceVersion,
+		TraceID: traceID,
+		Payload: payload,
+	})
+}
+
+// WriteTracedPacket encodes pk using the backend protocol and writes it through
+// WriteTraced.
+func (c *Conn) WriteTracedPacket(pk packet.Packet, traceID uint64) error {
+	buf := bufferPool.Get().(*bytes.Buffer)
+	header := headerPool.Get().(*packet.Header)
+	defer func() {
+		buf.Reset()
+		bufferPool.Put(buf)
+		headerPool.Put(header)
+	}()
+	header.PacketID = pk.ID()
+	if err := header.Write(buf); err != nil {
+		return err
+	}
+	pk.Marshal(c.protocol.NewWriter(buf, c.shieldID))
+	return c.WriteTraced(append([]byte(nil), buf.Bytes()...), traceID)
 }
 
 // Write writes provided byte slice to the underlying connection.

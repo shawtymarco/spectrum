@@ -83,6 +83,25 @@ loop:
 			if err := s.markBackendReady(server); err != nil {
 				server.CloseWithError(err)
 			}
+		case *spectrumpacket.TraceResult:
+			if pk.Version != 1 {
+				s.CloseWithError(fmt.Errorf("unsupported packet trace result version %d", pk.Version))
+				break loop
+			}
+			ctx := NewContext()
+			s.Processor().ProcessTraceResult(ctx, pk)
+			if ctx.traceAck() {
+				if err := s.queueTraceAcknowledgement(pk.TraceID, pk.Role); err != nil {
+					s.CloseWithError(fmt.Errorf("failed to write trace acknowledgement probe: %w", err))
+					break loop
+				}
+			}
+			if ctx.flush() {
+				if err := s.client.Flush(); err != nil {
+					s.CloseWithError(fmt.Errorf("failed to flush traced feedback: %w", err))
+					break loop
+				}
+			}
 		case packet.Packet:
 			if s.backendWaiting(server) {
 				continue loop
@@ -153,7 +172,7 @@ loop:
 		if s.backendWaiting(backend) {
 			continue loop
 		}
-		if err := handleClientPacket(s, backend, header, pool, shieldID, payload); err != nil {
+		if err := handleClientPacket(s, backend, header, pool, shieldID, payload, time.Now()); err != nil {
 			current, backendAddr := s.backendIsCurrent(backend)
 			if !current {
 				// A transfer may retire the backend while a client packet write is
@@ -223,7 +242,7 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 }
 
 // handleClientPacket processes and forwards the provided packet from the client to the server.
-func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet.Header, pool packet.Pool, shieldID int32, payload []byte) (err error) {
+func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet.Header, pool packet.Pool, shieldID int32, payload []byte, receivedAt time.Time) (err error) {
 	ctx := NewContext()
 	buf := bytes.NewBuffer(payload)
 	if err := header.Read(buf); err != nil {
@@ -232,20 +251,35 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 	if shouldDiscardClientPacket(s.opts, header.PacketID) {
 		return nil
 	}
-
-	if !shouldDecodeClientPacket(s.client.Proto(), s.opts, header.PacketID) {
-		s.Processor().ProcessClientEncoded(ctx, &payload)
-		if !ctx.Cancelled() {
-			return backend.Write(payload)
-		}
-		return
-	}
-
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic while decoding packet %v: %v", header.PacketID, r)
 		}
 	}()
+
+	if !shouldDecodeClientPacket(s.client.Proto(), s.opts, header.PacketID) {
+		if slices.Contains(s.opts.ClientTrace, header.PacketID) {
+			factory, ok := pool[header.PacketID]
+			if !ok {
+				return fmt.Errorf("unknown trace-inspected packet %d", header.PacketID)
+			}
+			inspected := factory()
+			inspectBody := bytes.NewBuffer(append([]byte(nil), buf.Bytes()...))
+			inspected.Marshal(s.client.Proto().NewReader(inspectBody, shieldID, true))
+			if inspectBody.Len() != 0 {
+				return fmt.Errorf("trace-inspected packet %d left %d bytes", header.PacketID, inspectBody.Len())
+			}
+			s.Processor().ProcessClientInspect(ctx, inspected)
+		}
+		s.Processor().ProcessClientEncoded(ctx, &payload)
+		if !ctx.Cancelled() {
+			if ctx.trace() {
+				return writeTracedClientPacket(s, backend, payload, receivedAt)
+			}
+			return backend.Write(payload)
+		}
+		return
+	}
 
 	factory, ok := pool[header.PacketID]
 	if !ok {
@@ -259,6 +293,15 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		if ctx.Cancelled() {
 			return
 		}
+		if latency, ok := pk.(*packet.NetworkStackLatency); ok {
+			if ack, matched := s.completeTraceAcknowledgement(latency.Timestamp); matched {
+				s.Processor().ProcessTraceAck(NewContext(), ack)
+				return nil
+			}
+		}
+		if ctx.trace() {
+			return writeTracedClientPacketObject(s, backend, pk, receivedAt)
+		}
 		return backend.WritePacket(pk)
 	}
 
@@ -267,12 +310,41 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		if ctx.Cancelled() {
 			break
 		}
+		if latency, ok := latest.(*packet.NetworkStackLatency); ok {
+			if ack, matched := s.completeTraceAcknowledgement(latency.Timestamp); matched {
+				s.Processor().ProcessTraceAck(NewContext(), ack)
+				continue
+			}
+		}
 
-		if err := backend.WritePacket(latest); err != nil {
+		if ctx.trace() {
+			err = writeTracedClientPacketObject(s, backend, latest, receivedAt)
+		} else {
+			err = backend.WritePacket(latest)
+		}
+		if err != nil {
 			return err
 		}
 	}
 	return
+}
+
+func writeTracedClientPacket(s *Session, backend *spectrumserver.Conn, payload []byte, receivedAt time.Time) error {
+	id := s.nextTraceID()
+	if err := backend.WriteTraced(payload, id); err != nil {
+		return err
+	}
+	s.Processor().ProcessTraceStart(NewContext(), TraceStart{ID: id, ReceivedAt: receivedAt, BackendWriteDuration: time.Since(receivedAt)})
+	return nil
+}
+
+func writeTracedClientPacketObject(s *Session, backend *spectrumserver.Conn, pk packet.Packet, receivedAt time.Time) error {
+	id := s.nextTraceID()
+	if err := backend.WriteTracedPacket(pk, id); err != nil {
+		return err
+	}
+	s.Processor().ProcessTraceStart(NewContext(), TraceStart{ID: id, ReceivedAt: receivedAt, BackendWriteDuration: time.Since(receivedAt)})
+	return nil
 }
 
 func shouldDiscardClientPacket(opts util.Opts, packetID uint32) bool {

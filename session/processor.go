@@ -1,13 +1,19 @@
 package session
 
 import (
+	"time"
+
+	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 // Context represents the context of an action. It holds the state of whether the action has been canceled.
 type Context struct {
-	canceled bool
+	canceled          bool
+	traceRequested    bool
+	flushRequested    bool
+	traceAckRequested bool
 }
 
 // NewContext returns a new context.
@@ -25,6 +31,39 @@ func (c *Context) Cancelled() bool {
 	return c.canceled
 }
 
+// RequestTrace asks Spectrum to carry the current packet in an internal trace
+// envelope while preserving its Bedrock payload and stream order.
+func (c *Context) RequestTrace() { c.traceRequested = true }
+
+func (c *Context) trace() bool { return c.traceRequested }
+
+// RequestFlush asks Spectrum to flush the public client's existing ordered
+// packet prefix after processing the current internal marker.
+func (c *Context) RequestFlush() { c.flushRequested = true }
+
+func (c *Context) flush() bool { return c.flushRequested }
+
+// RequestTraceAcknowledgement asks Spectrum to append a NetworkStackLatency
+// acknowledgement probe before any requested flush.
+func (c *Context) RequestTraceAcknowledgement() { c.traceAckRequested = true }
+
+func (c *Context) traceAck() bool { return c.traceAckRequested }
+
+// TraceStart reports that a traced client packet was written to the backend.
+type TraceStart struct {
+	ID                   uint64
+	ReceivedAt           time.Time
+	BackendWriteDuration time.Duration
+}
+
+// TraceAck reports a matching client response to a trace acknowledgement
+// probe. Duration starts when the probe was queued behind feedback.
+type TraceAck struct {
+	ID       uint64
+	Role     uint8
+	Duration time.Duration
+}
+
 // Processor defines methods for processing various actions within a proxy session.
 type Processor interface {
 	// ProcessStartGame is called only once during the login sequence.
@@ -35,8 +74,14 @@ type Processor interface {
 	ProcessServerEncoded(ctx *Context, pk *[]byte)
 	// ProcessClient is called before forwarding the client-sent packets to the server.
 	ProcessClient(ctx *Context, pk *packet.Packet)
+	// ProcessClientInspect sees a decoded copy of a packet that otherwise keeps
+	// Spectrum's native raw forwarding path. Packet mutations are ignored.
+	ProcessClientInspect(ctx *Context, pk packet.Packet)
 	// ProcessClientEncoded is called before forwarding the client-sent packets to the server.
 	ProcessClientEncoded(ctx *Context, pk *[]byte)
+	ProcessTraceStart(ctx *Context, trace TraceStart)
+	ProcessTraceResult(ctx *Context, result *spectrumpacket.TraceResult)
+	ProcessTraceAck(ctx *Context, ack TraceAck)
 	// ProcessFlush is called before flushing the player's minecraft.Conn buffer in response to a downstream server request.
 	ProcessFlush(ctx *Context)
 	// ProcessPreTransfer is called before transferring the player to a different server.
@@ -67,7 +112,11 @@ func (NopProcessor) ProcessStartGame(_ *Context, _ *minecraft.GameData)         
 func (NopProcessor) ProcessServer(_ *Context, _ *packet.Packet)                       {}
 func (NopProcessor) ProcessServerEncoded(_ *Context, _ *[]byte)                       {}
 func (NopProcessor) ProcessClient(_ *Context, _ *packet.Packet)                       {}
+func (NopProcessor) ProcessClientInspect(_ *Context, _ packet.Packet)                 {}
 func (NopProcessor) ProcessClientEncoded(_ *Context, _ *[]byte)                       {}
+func (NopProcessor) ProcessTraceStart(_ *Context, _ TraceStart)                       {}
+func (NopProcessor) ProcessTraceResult(_ *Context, _ *spectrumpacket.TraceResult)     {}
+func (NopProcessor) ProcessTraceAck(_ *Context, _ TraceAck)                           {}
 func (NopProcessor) ProcessFlush(_ *Context)                                          {}
 func (NopProcessor) ProcessPreTransfer(_ *Context, _ *string, _ *string)              {}
 func (NopProcessor) ProcessTransferFailure(_ *Context, _ *string, _ *string, _ error) {}
