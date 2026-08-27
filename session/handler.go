@@ -265,6 +265,14 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 }
 
 func shouldDiscardClientPacket(opts util.Opts, packetID uint32) bool {
+	switch packetID {
+	case packet.IDRequestChunkRadius, packet.IDSetLocalPlayerAsInitialised:
+		// The public gophertunnel connection owns these bootstrap responses.
+		// Spectrum synthesises the corresponding packets independently for every
+		// backend connection, so forwarding the public copies spawns the backend
+		// twice and emits duplicate clientbound bootstrap state.
+		return true
+	}
 	return slices.Contains(opts.ClientDiscard, packetID)
 }
 

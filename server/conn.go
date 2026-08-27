@@ -332,6 +332,9 @@ func (c *Conn) handlePacket(p packet.Packet) (err error) {
 	}
 
 	for _, pk := range pks {
+		if discardBackendBootstrapPacket(pk, c.client.Proto()) {
+			continue
+		}
 		if !slices.Contains(c.expectedIds, pk.ID()) {
 			c.deferPacket(pk)
 			continue
@@ -413,7 +416,6 @@ func (c *Conn) handleStartGame(pk *packet.StartGame) error {
 // handleItemRegistry handles the ItemRegistry packet.
 func (c *Conn) handleItemRegistry(pk *packet.ItemRegistry) error {
 	c.logger.Debug("received item_registry, expecting chunk_radius_updated")
-	c.deferPacket(pk)
 	c.expect(packet.IDChunkRadiusUpdated)
 	c.gameData.Items = pk.Items
 	for _, item := range pk.Items {
@@ -432,7 +434,6 @@ func (c *Conn) handleItemRegistry(pk *packet.ItemRegistry) error {
 // radius of the connection.
 func (c *Conn) handleChunkRadiusUpdated(pk *packet.ChunkRadiusUpdated) error {
 	c.logger.Debug("received chunk_radius_updated, expecting play_status")
-	c.deferPacket(pk)
 	c.expect(packet.IDPlayStatus)
 	c.gameData.ChunkRadius = pk.ChunkRadius
 	return nil
@@ -442,10 +443,21 @@ func (c *Conn) handleChunkRadiusUpdated(pk *packet.ChunkRadiusUpdated) error {
 // it responds to the server with a packet.SetLocalPlayerAsInitialised to finalize the connection sequence and spawn the player.
 func (c *Conn) handlePlayStatus(pk *packet.PlayStatus) error {
 	c.logger.Debug("received play_status, finalizing connection sequence")
-	c.deferPacket(pk)
 	close(c.connected)
 	if c.onConnect != nil {
 		c.onConnect(nil)
 	}
 	return nil
+}
+
+// discardBackendBootstrapPacket removes packets already owned by the public
+// gophertunnel connection. Protocols with a PreSpawnPackets hook, notably
+// protocol 486, have already sent their target biome definitions before the
+// public PlayerSpawn boundary and must not receive Dragonfly's later duplicate.
+func discardBackendBootstrapPacket(pk packet.Packet, proto minecraft.Protocol) bool {
+	if _, biome := pk.(*packet.BiomeDefinitionList); !biome {
+		return false
+	}
+	_, preSpawnOwned := proto.(minecraft.PreSpawnPacketsProtocol)
+	return preSpawnOwned
 }

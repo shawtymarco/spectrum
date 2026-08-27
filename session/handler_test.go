@@ -62,3 +62,15 @@ func TestConfiguredClientDiscardPrecedesDecode(t *testing.T) {
 		t.Fatal("unconfigured client packet was discarded")
 	}
 }
+
+func TestConnectionOwnedBootstrapPacketsAreDiscarded(t *testing.T) {
+	opts := *util.DefaultOpts()
+	for _, packetID := range []uint32{packet.IDRequestChunkRadius, packet.IDSetLocalPlayerAsInitialised} {
+		if !shouldDiscardClientPacket(opts, packetID) {
+			t.Fatalf("bootstrap packet %d was forwarded to the backend", packetID)
+		}
+	}
+	if shouldDiscardClientPacket(opts, packet.IDText) {
+		t.Fatal("ordinary gameplay packet was discarded")
+	}
+}
