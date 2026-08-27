@@ -14,6 +14,12 @@ type protocolWithID struct {
 	id int32
 }
 
+type protocolWithPreSpawn struct{ minecraft.Protocol }
+
+func (protocolWithPreSpawn) PreSpawnPackets() []packet.Packet {
+	return []packet.Packet{&packet.BiomeDefinitionList{}}
+}
+
 func TestEncodedPacketID(t *testing.T) {
 	var payload bytes.Buffer
 	header := &packet.Header{PacketID: packet.IDLevelChunk}
@@ -72,5 +78,18 @@ func TestConnectionOwnedBootstrapPacketsAreDiscarded(t *testing.T) {
 	}
 	if shouldDiscardClientPacket(opts, packet.IDText) {
 		t.Fatal("ordinary gameplay packet was discarded")
+	}
+}
+
+func TestLegacyBackendBiomeDefinitionsAreDiscardedAfterSpawn(t *testing.T) {
+	legacy := protocolWithPreSpawn{Protocol: minecraft.DefaultProtocol}
+	if !shouldDiscardServerPacket(legacy, &packet.BiomeDefinitionList{}) {
+		t.Fatal("late legacy biome definitions were forwarded")
+	}
+	if shouldDiscardServerPacket(minecraft.DefaultProtocol, &packet.BiomeDefinitionList{}) {
+		t.Fatal("native biome definitions were discarded")
+	}
+	if shouldDiscardServerPacket(legacy, &packet.CreativeContent{}) {
+		t.Fatal("legacy creative content was discarded")
 	}
 }

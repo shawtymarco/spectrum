@@ -87,6 +87,9 @@ loop:
 			if s.backendWaiting(server) {
 				continue loop
 			}
+			if shouldDiscardServerPacket(s.client.Proto(), pk) {
+				continue loop
+			}
 			if err := handleServerPacket(s, pk); err != nil {
 				s.CloseWithError(fmt.Errorf("failed to write packet to client: %w", err))
 				logError(s, "failed to write packet to client", err)
@@ -163,6 +166,14 @@ loop:
 			backend.CloseWithError(fmt.Errorf("failed to write packet to server: %w", err))
 		}
 	}
+}
+
+func shouldDiscardServerPacket(proto minecraft.Protocol, pk packet.Packet) bool {
+	if _, biome := pk.(*packet.BiomeDefinitionList); !biome {
+		return false
+	}
+	_, preSpawnOwned := proto.(minecraft.PreSpawnPacketsProtocol)
+	return preSpawnOwned
 }
 
 func encodedPacketID(payload []byte) (uint32, bool) {
