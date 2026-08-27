@@ -84,6 +84,10 @@ loop:
 				server.CloseWithError(err)
 			}
 		case *spectrumpacket.TraceResult:
+			current, _ := s.backendIsCurrent(server)
+			if !current || s.backendWaiting(server) {
+				continue loop
+			}
 			if pk.Version != 1 {
 				s.CloseWithError(fmt.Errorf("unsupported packet trace result version %d", pk.Version))
 				break loop
