@@ -26,6 +26,17 @@ func (animation *Dimension) Clear(conn *minecraft.Conn, serverGameData minecraft
 	sendDimension(conn, serverGameData, packet.DimensionOverworld, true)
 }
 
+// BeginClear returns the client to the backend dimension but deliberately
+// withholds PlayStatusPlayerSpawn until authoritative state and terrain arrive.
+func (animation *Dimension) BeginClear(conn *minecraft.Conn, serverGameData minecraft.GameData) {
+	sendDimension(conn, serverGameData, packet.DimensionOverworld, false)
+}
+
+// EndClear releases the client after the target backend's first final chunk.
+func (animation *Dimension) EndClear(conn *minecraft.Conn, _ minecraft.GameData) {
+	_ = conn.WritePacket(&packet.PlayStatus{Status: packet.PlayStatusPlayerSpawn})
+}
+
 // sendDimension updates the player's dimension and optionally force-spawns them if playStatus is enabled.
 func sendDimension(conn *minecraft.Conn, serverGameData minecraft.GameData, dimension int32, playStatus bool) {
 	_ = conn.WritePacket(&packet.ChangeDimension{Dimension: dimension, Position: serverGameData.PlayerPosition})

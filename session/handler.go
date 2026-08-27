@@ -29,6 +29,7 @@ loop:
 		server := s.Server()
 		pk, err := server.ReadPacket()
 		if err != nil {
+			s.cancelReadyTransfer(server)
 			current, backendAddr := s.backendIsCurrent(server)
 			if !current {
 				s.logger.Debug("retired backend stream closed during transfer", "err", err)
@@ -50,6 +51,9 @@ loop:
 
 		switch pk := pk.(type) {
 		case *spectrumpacket.Flush:
+			if s.backendWaiting(server) {
+				continue loop
+			}
 			ctx := NewContext()
 			s.Processor().ProcessFlush(ctx)
 			if ctx.Cancelled() {
@@ -64,18 +68,38 @@ loop:
 		case *spectrumpacket.Latency:
 			s.latency.Store(pk.Latency)
 		case *spectrumpacket.Transfer:
-			if err := s.Transfer(pk.Addr); err != nil {
+			var err error
+			if pk.WaitForReady {
+				err = s.TransferReady(pk.Addr)
+			} else {
+				err = s.Transfer(pk.Addr)
+			}
+			if err != nil {
 				logError(s, "failed to transfer", err)
 			}
 		case *spectrumpacket.UpdateCache:
 			s.SetCache(pk.Cache)
+		case *spectrumpacket.BackendReady:
+			if err := s.markBackendReady(server); err != nil {
+				server.CloseWithError(err)
+			}
 		case packet.Packet:
+			if s.backendWaiting(server) {
+				continue loop
+			}
 			if err := handleServerPacket(s, pk); err != nil {
 				s.CloseWithError(fmt.Errorf("failed to write packet to client: %w", err))
 				logError(s, "failed to write packet to client", err)
 				break loop
 			}
+			if _, ok := pk.(*packet.LevelChunk); ok {
+				s.completeReadyTransfer(server)
+			}
 		case []byte:
+			if s.backendWaiting(server) {
+				continue loop
+			}
+			packetID, packetIDOK := encodedPacketID(pk)
 			ctx := NewContext()
 			s.Processor().ProcessServerEncoded(ctx, &pk)
 			if ctx.Cancelled() {
@@ -86,6 +110,9 @@ loop:
 				s.CloseWithError(fmt.Errorf("failed to write packet to client: %w", err))
 				logError(s, "failed to write packet to client", err)
 				break loop
+			}
+			if packetIDOK && packetID == packet.IDLevelChunk {
+				s.completeReadyTransfer(server)
 			}
 		}
 	}
@@ -120,6 +147,9 @@ loop:
 		}
 
 		backend := s.Server()
+		if s.backendWaiting(backend) {
+			continue loop
+		}
 		if err := handleClientPacket(s, backend, header, pool, shieldID, payload); err != nil {
 			current, backendAddr := s.backendIsCurrent(backend)
 			if !current {
@@ -133,6 +163,14 @@ loop:
 			backend.CloseWithError(fmt.Errorf("failed to write packet to server: %w", err))
 		}
 	}
+}
+
+func encodedPacketID(payload []byte) (uint32, bool) {
+	header := &packet.Header{}
+	if err := header.Read(bytes.NewBuffer(payload)); err != nil {
+		return 0, false
+	}
+	return header.PacketID, true
 }
 
 // handleLatency periodically sends the client's current ping and timestamp to the server for latency reporting.

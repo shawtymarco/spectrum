@@ -1,15 +1,28 @@
 package session
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/cooldogedev/spectrum/util"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 type protocolWithID struct {
 	minecraft.Protocol
 	id int32
+}
+
+func TestEncodedPacketID(t *testing.T) {
+	var payload bytes.Buffer
+	header := &packet.Header{PacketID: packet.IDLevelChunk}
+	if err := header.Write(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := encodedPacketID(payload.Bytes()); !ok || got != packet.IDLevelChunk {
+		t.Fatalf("encoded packet ID = %d, %t", got, ok)
+	}
 }
 
 func (p protocolWithID) ID() int32 { return p.id }

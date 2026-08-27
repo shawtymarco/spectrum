@@ -43,6 +43,8 @@ type Session struct {
 
 	processor   Processor
 	processorMu sync.RWMutex
+	readyMu     sync.Mutex
+	ready       *readyTransfer
 
 	cache      atomic.Value
 	latency    atomic.Int64
@@ -51,6 +53,24 @@ type Session struct {
 }
 
 var errFallbackInProgress = errors.New("fallback already in progress")
+
+const backendReadyTimeout = 15 * time.Second
+
+type readyTransferPhase uint8
+
+const (
+	readyTransferWaiting readyTransferPhase = iota
+	readyTransferStreaming
+)
+
+type readyTransfer struct {
+	backend *server.Conn
+	origin  string
+	target  string
+	data    minecraft.GameData
+	phase   readyTransferPhase
+	timer   *time.Timer
+}
 
 // NewSession creates a new Session instance using the provided minecraft.Conn.
 func NewSession(client *minecraft.Conn, logger *slog.Logger, registry *Registry, discovery server.Discovery, opts util.Opts, transport transport.Transport) *Session {
@@ -140,7 +160,15 @@ func (s *Session) LoginContext(ctx context.Context) (err error) {
 func (s *Session) Transfer(addr string) (err error) {
 	ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
 	defer cancel()
-	return s.TransferContext(ctx, addr)
+	return s.transferContext(ctx, addr, false)
+}
+
+// TransferReady initiates a transfer whose target must publish BackendReady.
+// Packets produced by the target before that marker are discarded.
+func (s *Session) TransferReady(addr string) (err error) {
+	ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
+	defer cancel()
+	return s.transferContext(ctx, addr, true)
 }
 
 // TransferTimeout initiates a transfer to a different server using the specified address
@@ -148,13 +176,17 @@ func (s *Session) Transfer(addr string) (err error) {
 func (s *Session) TransferTimeout(addr string, duration time.Duration) (err error) {
 	ctx, cancel := context.WithTimeout(s.ctx, duration)
 	defer cancel()
-	return s.TransferContext(ctx, addr)
+	return s.transferContext(ctx, addr, false)
 }
 
 // TransferContext initiates a transfer to a different server using the specified address. It ensures that only one transfer
 // occurs at a time, returning an error if another transfer is already in progress.
 // The process is performed using the provided context for cancellation.
 func (s *Session) TransferContext(ctx context.Context, addr string) (err error) {
+	return s.transferContext(ctx, addr, false)
+}
+
+func (s *Session) transferContext(ctx context.Context, addr string, waitForReady bool) (err error) {
 	s.serverMu.RLock()
 	origin := s.serverAddr
 	s.serverMu.RUnlock()
@@ -186,9 +218,17 @@ func (s *Session) TransferContext(ctx context.Context, addr string) (err error) 
 		gameData := conn.GameData()
 		s.animation.Play(s.client, gameData)
 		s.sendGameData(conn.GameData())
+		if waitForReady {
+			s.installReadyTransfer(conn, origin, addr, gameData)
+		}
 		if err := conn.DoSpawn(); err != nil {
+			s.cancelReadyTransfer(conn)
 			s.inFallback.Store(false)
 			s.Processor().ProcessTransferFailure(NewContext(), &origin, &addr, err)
+			return
+		}
+		if waitForReady {
+			s.logger.Debug("waiting for backend ready", "origin", origin, "target", addr)
 			return
 		}
 		s.inFallback.Store(false)
@@ -197,6 +237,95 @@ func (s *Session) TransferContext(ctx context.Context, addr string) (err error) 
 		s.logger.Debug("transferred session", "origin", origin, "target", addr)
 	})
 	return nil
+}
+
+func (s *Session) installReadyTransfer(backend *server.Conn, origin, target string, data minecraft.GameData) {
+	state := &readyTransfer{backend: backend, origin: origin, target: target, data: data, phase: readyTransferWaiting}
+	state.timer = time.AfterFunc(backendReadyTimeout, func() {
+		if !s.takeReadyTransfer(backend, readyTransferWaiting) {
+			return
+		}
+		backend.CloseWithError(fmt.Errorf("backend ready timeout after %s", backendReadyTimeout))
+	})
+
+	s.readyMu.Lock()
+	previous := s.ready
+	s.ready = state
+	s.readyMu.Unlock()
+	if previous != nil && previous.timer != nil {
+		previous.timer.Stop()
+	}
+}
+
+func (s *Session) markBackendReady(backend *server.Conn) error {
+	s.readyMu.Lock()
+	state := s.ready
+	if state == nil || state.backend != backend {
+		s.readyMu.Unlock()
+		return errors.New("backend ready received without a pending transfer")
+	}
+	if state.phase != readyTransferWaiting {
+		s.readyMu.Unlock()
+		return errors.New("backend ready received more than once")
+	}
+	state.phase = readyTransferStreaming
+	data := state.data
+	target := state.target
+	s.readyMu.Unlock()
+
+	animation.BeginClear(s.animation, s.client, data)
+	s.logger.Debug("backend ready received; waiting for first chunk", "target", target)
+	return nil
+}
+
+func (s *Session) backendWaiting(backend *server.Conn) bool {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
+	return s.ready != nil && s.ready.backend == backend && s.ready.phase == readyTransferWaiting
+}
+
+func (s *Session) completeReadyTransfer(backend *server.Conn) {
+	s.readyMu.Lock()
+	state := s.ready
+	if state == nil || state.backend != backend || state.phase != readyTransferStreaming {
+		s.readyMu.Unlock()
+		return
+	}
+	s.ready = nil
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	s.readyMu.Unlock()
+
+	animation.EndClear(s.animation, s.client, state.data)
+	_ = s.client.Flush()
+	s.inFallback.Store(false)
+	s.Processor().ProcessPostTransfer(NewContext(), &state.origin, &state.target)
+	s.logger.Debug("transferred ready session", "origin", state.origin, "target", state.target)
+}
+
+func (s *Session) takeReadyTransfer(backend *server.Conn, phase readyTransferPhase) bool {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
+	if s.ready == nil || s.ready.backend != backend || s.ready.phase != phase {
+		return false
+	}
+	s.ready = nil
+	return true
+}
+
+func (s *Session) cancelReadyTransfer(backend *server.Conn) {
+	s.readyMu.Lock()
+	state := s.ready
+	if state == nil || state.backend != backend {
+		s.readyMu.Unlock()
+		return
+	}
+	s.ready = nil
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	s.readyMu.Unlock()
 }
 
 // Animation returns the animation set to be played during server transfers.
@@ -323,6 +452,7 @@ func (s *Session) dial(ctx context.Context, addr string) (*server.Conn, error) {
 	s.serverConn = c
 	s.serverMu.Unlock()
 	if previous != nil {
+		s.cancelReadyTransfer(previous)
 		_ = previous.Close()
 	}
 	return c, nil

@@ -16,6 +16,33 @@ type Animation interface {
 	Clear(conn *minecraft.Conn, serverGameData minecraft.GameData)
 }
 
+// PhasedAnimation separates the return to the target dimension from the final
+// spawn notification. A ready-gated backend streams its authoritative player
+// state and first chunk between these two calls.
+type PhasedAnimation interface {
+	Animation
+	BeginClear(conn *minecraft.Conn, serverGameData minecraft.GameData)
+	EndClear(conn *minecraft.Conn, serverGameData minecraft.GameData)
+}
+
+// BeginClear starts the final half of an animation without exposing the
+// client as spawned. Animations without a phased implementation remain active.
+func BeginClear(a Animation, conn *minecraft.Conn, data minecraft.GameData) {
+	if phased, ok := a.(PhasedAnimation); ok {
+		phased.BeginClear(conn, data)
+	}
+}
+
+// EndClear publishes the final spawn boundary. Legacy animations retain their
+// original one-shot Clear implementation.
+func EndClear(a Animation, conn *minecraft.Conn, data minecraft.GameData) {
+	if phased, ok := a.(PhasedAnimation); ok {
+		phased.EndClear(conn, data)
+		return
+	}
+	a.Clear(conn, data)
+}
+
 // NopAnimation is a no-operation implementation of the Animation interface.
 type NopAnimation struct{}
 

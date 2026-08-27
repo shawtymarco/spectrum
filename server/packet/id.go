@@ -7,4 +7,5 @@ const (
 	IDLatency
 	IDTransfer
 	IDUpdateCache
+	IDBackendReady
 )
