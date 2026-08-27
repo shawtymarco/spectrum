@@ -366,11 +366,21 @@ func (s *Session) SetProcessor(processor Processor) {
 	s.processorMu.Unlock()
 }
 
-// Latency returns the total latency experienced by the session, combining client and server latencies.
-// The client's latency is derived from half of RakNet's round-trip time (RTT).
-// To calculate the total latency, we multiply this value by 2.
+// Latency returns the measured end-to-end round-trip time. The backend
+// response already includes the public RakNet RTT, so adding it again would
+// double-count the client leg.
 func (s *Session) Latency() int64 {
-	return (s.client.Latency().Milliseconds() * 2) + s.latency.Load()
+	return reportedLatency(s.client.Latency().Milliseconds(), s.latency.Load())
+}
+
+func reportedLatency(clientHalfRTT, backendReportedRTT int64) int64 {
+	if backendReportedRTT > 0 {
+		return backendReportedRTT
+	}
+	if clientHalfRTT < 0 {
+		return 0
+	}
+	return clientHalfRTT * 2
 }
 
 // Client returns the client connection.
