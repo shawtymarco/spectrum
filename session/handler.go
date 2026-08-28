@@ -101,9 +101,40 @@ loop:
 				}
 			}
 			if ctx.flush() {
+				startedAt := time.Now()
 				if err := s.client.Flush(); err != nil {
 					s.CloseWithError(fmt.Errorf("failed to flush traced feedback: %w", err))
 					break loop
+				}
+				if processor, ok := s.Processor().(TraceFlushProcessor); ok {
+					processor.ProcessTraceFlush(NewContext(), TraceFlush{
+						ID:          pk.TraceID,
+						Role:        pk.Role,
+						StartedAt:   startedAt,
+						CompletedAt: time.Now(),
+					})
+				}
+				for _, delay := range ctx.followups() {
+					time.AfterFunc(delay, func() {
+						select {
+						case <-s.ctx.Done():
+							return
+						default:
+						}
+						followupStartedAt := time.Now()
+						if err := s.client.Flush(); err != nil {
+							logError(s, "failed to flush traced follow-up feedback", err)
+							return
+						}
+						if processor, ok := s.Processor().(TraceFlushProcessor); ok {
+							processor.ProcessTraceFlush(NewContext(), TraceFlush{
+								ID:          pk.TraceID,
+								Role:        pk.Role,
+								StartedAt:   followupStartedAt,
+								CompletedAt: time.Now(),
+							})
+						}
+					})
 				}
 			}
 		case packet.Packet:

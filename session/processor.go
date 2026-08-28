@@ -14,6 +14,7 @@ type Context struct {
 	traceRequested    bool
 	flushRequested    bool
 	traceAckRequested bool
+	followupFlushes   []time.Duration
 }
 
 // NewContext returns a new context.
@@ -43,6 +44,21 @@ func (c *Context) RequestFlush() { c.flushRequested = true }
 
 func (c *Context) flush() bool { return c.flushRequested }
 
+// RequestFollowupFlushes asks Spectrum to flush the public client again after
+// each positive delay. It does not duplicate or reorder packets: each flush
+// sends only the FIFO prefix accumulated at that time.
+func (c *Context) RequestFollowupFlushes(delays ...time.Duration) {
+	for _, delay := range delays {
+		if delay > 0 {
+			c.followupFlushes = append(c.followupFlushes, delay)
+		}
+	}
+}
+
+func (c *Context) followups() []time.Duration {
+	return append([]time.Duration(nil), c.followupFlushes...)
+}
+
 // RequestTraceAcknowledgement asks Spectrum to append a NetworkStackLatency
 // acknowledgement probe before any requested flush.
 func (c *Context) RequestTraceAcknowledgement() { c.traceAckRequested = true }
@@ -62,6 +78,23 @@ type TraceAck struct {
 	ID       uint64
 	Role     uint8
 	Duration time.Duration
+}
+
+// TraceFlush reports completion of an ordered public-client flush requested
+// by a trace result. StartedAt and CompletedAt use the edge process clock and
+// are intended for diagnostics only.
+type TraceFlush struct {
+	ID          uint64
+	Role        uint8
+	StartedAt   time.Time
+	CompletedAt time.Time
+}
+
+// TraceFlushProcessor is an optional extension for processors that need the
+// exact edge flush completion boundary without changing the public Bedrock
+// wire or the base Processor contract.
+type TraceFlushProcessor interface {
+	ProcessTraceFlush(ctx *Context, flush TraceFlush)
 }
 
 // Processor defines methods for processing various actions within a proxy session.
@@ -117,6 +150,7 @@ func (NopProcessor) ProcessClientEncoded(_ *Context, _ *[]byte)                 
 func (NopProcessor) ProcessTraceStart(_ *Context, _ TraceStart)                       {}
 func (NopProcessor) ProcessTraceResult(_ *Context, _ *spectrumpacket.TraceResult)     {}
 func (NopProcessor) ProcessTraceAck(_ *Context, _ TraceAck)                           {}
+func (NopProcessor) ProcessTraceFlush(_ *Context, _ TraceFlush)                       {}
 func (NopProcessor) ProcessFlush(_ *Context)                                          {}
 func (NopProcessor) ProcessPreTransfer(_ *Context, _ *string, _ *string)              {}
 func (NopProcessor) ProcessTransferFailure(_ *Context, _ *string, _ *string, _ error) {}
