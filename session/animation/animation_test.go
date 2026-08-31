@@ -48,3 +48,20 @@ func TestLegacyClearRunsOnlyAtEnd(t *testing.T) {
 		t.Fatalf("legacy clear calls = %d, want 1", a.clear)
 	}
 }
+
+func TestAcknowledgedDimensionRequiresClientBoundary(t *testing.T) {
+	if !NeedsAcknowledgement(&AcknowledgedDimension{}) {
+		t.Fatal("acknowledged dimension animation did not expose its client boundary")
+	}
+	if NeedsAcknowledgement(&Dimension{}) {
+		t.Fatal("server-acknowledged dimension animation unexpectedly waits for the client")
+	}
+}
+
+func TestAlternateDimensionDiffersFromTarget(t *testing.T) {
+	for _, target := range []int32{0, 1, 2} {
+		if got := alternateDimension(target); got == target {
+			t.Fatalf("alternate dimension for %d remained unchanged", target)
+		}
+	}
+}

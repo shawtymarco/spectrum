@@ -41,10 +41,12 @@ type Session struct {
 	animation animation.Animation
 	tracker   *tracker
 
-	processor   Processor
-	processorMu sync.RWMutex
-	readyMu     sync.Mutex
-	ready       *readyTransfer
+	processor    Processor
+	processorMu  sync.RWMutex
+	readyMu      sync.Mutex
+	ready        *readyTransfer
+	ackMu        sync.Mutex
+	acknowledged *acknowledgedTransfer
 
 	cache      atomic.Value
 	latency    atomic.Int64
@@ -77,6 +79,15 @@ type readyTransfer struct {
 	data    minecraft.GameData
 	phase   readyTransferPhase
 	timer   *time.Timer
+}
+
+type acknowledgedTransfer struct {
+	backend      *server.Conn
+	origin       string
+	target       string
+	data         minecraft.GameData
+	waitForReady bool
+	timer        *time.Timer
 }
 
 // NewSession creates a new Session instance using the provided minecraft.Conn.
@@ -225,10 +236,18 @@ func (s *Session) transferContext(ctx context.Context, addr string, waitForReady
 		}
 
 		gameData := conn.GameData()
-		s.animation.Play(s.client, gameData)
-		s.sendGameData(conn.GameData())
 		if waitForReady {
 			s.installReadyTransfer(conn, origin, addr, gameData)
+		}
+		acknowledged := animation.NeedsAcknowledgement(s.animation)
+		if acknowledged {
+			s.installAcknowledgedTransfer(conn, origin, addr, gameData, waitForReady)
+		}
+		s.animation.Play(s.client, gameData)
+		s.sendGameData(conn.GameData())
+		if acknowledged {
+			s.logger.Debug("waiting for dimension acknowledgement", "origin", origin, "target", addr)
+			return
 		}
 		if err := conn.DoSpawn(); err != nil {
 			s.cancelReadyTransfer(conn)
@@ -246,6 +265,88 @@ func (s *Session) transferContext(ctx context.Context, addr string, waitForReady
 		s.logger.Debug("transferred session", "origin", origin, "target", addr)
 	})
 	return nil
+}
+
+func (s *Session) installAcknowledgedTransfer(backend *server.Conn, origin, target string, data minecraft.GameData, waitForReady bool) {
+	state := &acknowledgedTransfer{backend: backend, origin: origin, target: target, data: data, waitForReady: waitForReady}
+	state.timer = time.AfterFunc(backendReadyTimeout, func() {
+		if !s.expireAcknowledgedTransfer(backend) {
+			return
+		}
+		s.cancelReadyTransfer(backend)
+		backend.CloseWithError(fmt.Errorf("dimension acknowledgement timeout after %s", backendReadyTimeout))
+	})
+
+	s.ackMu.Lock()
+	previous := s.acknowledged
+	s.acknowledged = state
+	s.ackMu.Unlock()
+	if previous != nil && previous.timer != nil {
+		previous.timer.Stop()
+	}
+}
+
+func (s *Session) resumeAcknowledgedTransfer(backend *server.Conn) bool {
+	s.ackMu.Lock()
+	state := s.acknowledged
+	if state == nil || state.backend != backend {
+		s.ackMu.Unlock()
+		return false
+	}
+	s.acknowledged = nil
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	s.ackMu.Unlock()
+
+	if state.waitForReady {
+		if err := backend.DoSpawn(); err != nil {
+			s.cancelReadyTransfer(backend)
+			backend.CloseWithError(fmt.Errorf("start ready backend after dimension acknowledgement: %w", err))
+		}
+		return true
+	}
+
+	animation.BeginClear(s.animation, s.client, state.data)
+	if err := backend.DoSpawn(); err != nil {
+		backend.CloseWithError(fmt.Errorf("start backend after dimension acknowledgement: %w", err))
+		return true
+	}
+	animation.EndClear(s.animation, s.client, state.data)
+	s.inFallback.Store(false)
+	s.Processor().ProcessPostTransfer(NewContext(), &state.origin, &state.target)
+	s.logger.Debug("transferred acknowledged session", "origin", state.origin, "target", state.target)
+	return true
+}
+
+func (s *Session) acknowledgementWaiting(backend *server.Conn) bool {
+	s.ackMu.Lock()
+	defer s.ackMu.Unlock()
+	return s.acknowledged != nil && s.acknowledged.backend == backend
+}
+
+func (s *Session) expireAcknowledgedTransfer(backend *server.Conn) bool {
+	s.ackMu.Lock()
+	defer s.ackMu.Unlock()
+	if s.acknowledged == nil || s.acknowledged.backend != backend {
+		return false
+	}
+	s.acknowledged = nil
+	return true
+}
+
+func (s *Session) cancelAcknowledgedTransfer(backend *server.Conn) {
+	s.ackMu.Lock()
+	state := s.acknowledged
+	if state == nil || state.backend != backend {
+		s.ackMu.Unlock()
+		return
+	}
+	s.acknowledged = nil
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	s.ackMu.Unlock()
 }
 
 func (s *Session) installReadyTransfer(backend *server.Conn, origin, target string, data minecraft.GameData) {
@@ -472,6 +573,7 @@ func (s *Session) dial(ctx context.Context, addr string) (*server.Conn, error) {
 	s.serverMu.Unlock()
 	if previous != nil {
 		s.cancelReadyTransfer(previous)
+		s.cancelAcknowledgedTransfer(previous)
 		_ = previous.Close()
 	}
 	return c, nil

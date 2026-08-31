@@ -25,6 +25,22 @@ type PhasedAnimation interface {
 	EndClear(conn *minecraft.Conn, serverGameData minecraft.GameData)
 }
 
+// AcknowledgedAnimation marks an animation whose first phase must finish on
+// the client before Spectrum may start the target backend. Older Bedrock
+// clients acknowledge ChangeDimension themselves and ignore a second
+// ChangeDimension sent before that acknowledgement arrives.
+type AcknowledgedAnimation interface {
+	Animation
+	RequiresAcknowledgement()
+}
+
+// NeedsAcknowledgement reports whether a transfer must wait for the client's
+// first dimension-change acknowledgement before starting the target backend.
+func NeedsAcknowledgement(a Animation) bool {
+	_, ok := a.(AcknowledgedAnimation)
+	return ok
+}
+
 // BeginClear starts the final half of an animation without exposing the
 // client as spawned. Animations without a phased implementation remain active.
 func BeginClear(a Animation, conn *minecraft.Conn, data minecraft.GameData) {

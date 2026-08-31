@@ -12,6 +12,7 @@ import (
 	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
 	"github.com/cooldogedev/spectrum/util"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -30,6 +31,7 @@ loop:
 		pk, err := server.ReadPacket()
 		if err != nil {
 			s.cancelReadyTransfer(server)
+			s.cancelAcknowledgedTransfer(server)
 			current, backendAddr := s.backendIsCurrent(server)
 			if !current {
 				s.logger.Debug("retired backend stream closed during transfer", "err", err)
@@ -204,7 +206,7 @@ loop:
 		}
 
 		backend := s.Server()
-		if s.backendWaiting(backend) {
+		if s.backendWaiting(backend) && !s.acknowledgementWaiting(backend) {
 			continue loop
 		}
 		if err := handleClientPacket(s, backend, header, pool, shieldID, payload, time.Now()); err != nil {
@@ -324,6 +326,12 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 	pk := factory()
 	pk.Marshal(s.client.Proto().NewReader(buf, shieldID, true))
 	if s.opts.SyncProtocol {
+		if consumeDimensionAcknowledgement(s, backend, pk) {
+			return nil
+		}
+		if s.acknowledgementWaiting(backend) || s.backendWaiting(backend) {
+			return nil
+		}
 		s.Processor().ProcessClient(ctx, &pk)
 		if ctx.Cancelled() {
 			return
@@ -341,6 +349,12 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 	}
 
 	for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
+		if consumeDimensionAcknowledgement(s, backend, latest) {
+			continue
+		}
+		if s.acknowledgementWaiting(backend) || s.backendWaiting(backend) {
+			continue
+		}
 		s.Processor().ProcessClient(ctx, &latest)
 		if ctx.Cancelled() {
 			break
@@ -362,6 +376,15 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		}
 	}
 	return
+}
+
+func consumeDimensionAcknowledgement(s *Session, backend *spectrumserver.Conn, pk packet.Packet) bool {
+	return isDimensionAcknowledgement(pk) && s.resumeAcknowledgedTransfer(backend)
+}
+
+func isDimensionAcknowledgement(pk packet.Packet) bool {
+	action, ok := pk.(*packet.PlayerAction)
+	return ok && action.ActionType == protocol.PlayerActionDimensionChangeDone
 }
 
 func writeTracedClientPacket(s *Session, backend *spectrumserver.Conn, payload []byte, receivedAt time.Time) error {
