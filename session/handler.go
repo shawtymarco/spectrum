@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	spectrumserver "github.com/cooldogedev/spectrum/server"
 	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
 	"github.com/cooldogedev/spectrum/util"
 	"github.com/sandertv/gophertunnel/minecraft"
-	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -267,7 +265,6 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 	if ctx.Cancelled() {
 		return
 	}
-	traceFauxSpectatorServerPacket(s, pk)
 
 	if s.opts.SyncProtocol {
 		for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
@@ -326,7 +323,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 
 	pk := factory()
 	pk.Marshal(s.client.Proto().NewReader(buf, shieldID, true))
-	traceFauxSpectatorClientPacket(s, pk)
 	if s.opts.SyncProtocol {
 		s.Processor().ProcessClient(ctx, &pk)
 		if ctx.Cancelled() {
@@ -366,112 +362,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		}
 	}
 	return
-}
-
-// traceFauxSpectatorServerPacket is temporary production instrumentation for
-// the live Creative-presented spectator transition. It is deliberately limited
-// to the reproducing account and the packet families that mutate game type,
-// abilities, or grounded state.
-func traceFauxSpectatorServerPacket(s *Session, pk packet.Packet) {
-	if !fauxSpectatorTraceEnabled(s) {
-		return
-	}
-	common := []any{"direction", "server_to_client", "protocol", s.client.Proto().ID(), "version", s.client.Proto().Ver()}
-	switch pk := pk.(type) {
-	case *packet.SetPlayerGameType:
-		s.logger.Info("faux spectator packet trace", append(common, "sequence", s.spectatorTraceSequence.Add(1), "packet", "SetPlayerGameType", "game_type", pk.GameType)...)
-	case *packet.UpdateAbilities:
-		layers := make([]string, 0, len(pk.AbilityData.Layers))
-		var flying, mayFly, noClip bool
-		for _, layer := range pk.AbilityData.Layers {
-			layers = append(layers, fmt.Sprintf("type=%d mask=%#x values=%#x fly=%.3f vertical=%.3f walk=%.3f", layer.Type, layer.Abilities, layer.Values, layer.FlySpeed, layer.VerticalFlySpeed, layer.WalkSpeed))
-			flying = flying || layer.Values&protocol.AbilityFlying != 0
-			mayFly = mayFly || layer.Values&protocol.AbilityMayFly != 0
-			noClip = noClip || layer.Values&protocol.AbilityNoClip != 0
-		}
-		s.logger.Info("faux spectator packet trace", append(common,
-			"sequence", s.spectatorTraceSequence.Add(1),
-			"packet", "UpdateAbilities",
-			"entity_unique_id", pk.AbilityData.EntityUniqueID,
-			"player_permission", pk.AbilityData.PlayerPermissions,
-			"command_permission", pk.AbilityData.CommandPermissions,
-			"flying", flying,
-			"may_fly", mayFly,
-			"no_clip", noClip,
-			"layers", layers,
-		)...)
-	case *packet.AdventureSettings:
-		s.logger.Info("faux spectator packet trace", append(common,
-			"sequence", s.spectatorTraceSequence.Add(1),
-			"packet", "AdventureSettings",
-			"flags", fmt.Sprintf("%#x", pk.Flags),
-			"action_permissions", fmt.Sprintf("%#x", pk.ActionPermissions),
-			"player_unique_id", pk.PlayerUniqueID,
-		)...)
-	case *packet.MovePlayer:
-		if pk.Mode == packet.MoveModeTeleport {
-			s.logger.Info("faux spectator packet trace", append(common,
-				"sequence", s.spectatorTraceSequence.Add(1),
-				"packet", "MovePlayer",
-				"mode", pk.Mode,
-				"on_ground", pk.OnGround,
-				"position", pk.Position,
-			)...)
-		}
-	}
-}
-
-// traceFauxSpectatorClientPacket pairs the outbound transition with the
-// client's flight and jump state. Jump edges are included because the defect
-// currently clears only after a manual double-space gesture.
-func traceFauxSpectatorClientPacket(s *Session, pk packet.Packet) {
-	if !fauxSpectatorTraceEnabled(s) {
-		return
-	}
-	common := []any{"direction", "client_to_server", "protocol", s.client.Proto().ID(), "version", s.client.Proto().Ver()}
-	switch pk := pk.(type) {
-	case *packet.PlayerAuthInput:
-		flags := pk.InputData
-		startFlying := flags.Load(packet.InputFlagStartFlying)
-		stopFlying := flags.Load(packet.InputFlagStopFlying)
-		startJumping := flags.Load(packet.InputFlagStartJumping)
-		jumpPressed := flags.Load(packet.InputFlagJumpPressedRaw)
-		jumpReleased := flags.Load(packet.InputFlagJumpReleasedRaw)
-		if !startFlying && !stopFlying && !startJumping && !jumpPressed && !jumpReleased {
-			return
-		}
-		sequence := s.spectatorTraceSequence.Add(1)
-		s.logger.Info("faux spectator packet trace", append(common,
-			"sequence", sequence,
-			"packet", "PlayerAuthInput",
-			"start_flying", startFlying,
-			"stop_flying", stopFlying,
-			"start_jumping", startJumping,
-			"jump_down", flags.Load(packet.InputFlagJumpDown),
-			"jumping", flags.Load(packet.InputFlagJumping),
-			"jump_pressed_raw", jumpPressed,
-			"jump_released_raw", jumpReleased,
-			"ascend", flags.Load(packet.InputFlagAscend),
-			"tick", pk.Tick,
-			"position", pk.Position,
-			"delta", pk.Delta,
-		)...)
-	case *packet.RequestAbility:
-		if pk.Ability != packet.AbilityFlying {
-			return
-		}
-		sequence := s.spectatorTraceSequence.Add(1)
-		s.logger.Info("faux spectator packet trace", append(common,
-			"sequence", sequence,
-			"packet", "RequestAbility",
-			"ability", pk.Ability,
-			"value", pk.Value,
-		)...)
-	}
-}
-
-func fauxSpectatorTraceEnabled(s *Session) bool {
-	return strings.EqualFold(s.client.IdentityData().DisplayName, "kmm")
 }
 
 func writeTracedClientPacket(s *Session, backend *spectrumserver.Conn, payload []byte, receivedAt time.Time) error {

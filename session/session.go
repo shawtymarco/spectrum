@@ -51,12 +51,11 @@ type Session struct {
 	inFallback atomic.Bool
 	once       sync.Once
 
-	tracePrefix            uint64
-	traceSequence          atomic.Uint64
-	traceAckSequence       atomic.Uint64
-	spectatorTraceSequence atomic.Uint64
-	traceAckMu             sync.Mutex
-	traceAcks              map[int64]pendingTraceAck
+	tracePrefix      uint64
+	traceSequence    atomic.Uint64
+	traceAckSequence atomic.Uint64
+	traceAckMu       sync.Mutex
+	traceAcks        map[int64]pendingTraceAck
 }
 
 var errFallbackInProgress = errors.New("fallback already in progress")
