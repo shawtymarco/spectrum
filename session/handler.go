@@ -269,10 +269,12 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 	}
 	traceLegacy118Packet(s, "server_to_client", pk)
 	if legacy118TraceEnabled(s) {
-		// Temporary isolation: public StartGame and its protocol-owned pre-spawn
-		// packets are already complete. Withhold the entire backend stream to
-		// separate those from every post-spawn gameplay packet.
-		return nil
+		// Temporary binary search: allow ItemRegistry, ChunkRadiusUpdated,
+		// CreativeContent and CraftingData, then withhold the remaining backend
+		// stream. The StartGame-only control survives indefinitely.
+		if s.legacy118ServerPacketSequence.Add(1) > 4 {
+			return nil
+		}
 	}
 
 	if s.opts.SyncProtocol {
