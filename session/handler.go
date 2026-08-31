@@ -269,11 +269,10 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 	}
 	traceLegacy118Packet(s, "server_to_client", pk)
 	if legacy118TraceEnabled(s) {
-		if _, chunk := pk.(*packet.LevelChunk); chunk {
-			// Temporary isolation: keep the real 1.18.12 client alive through the
-			// rest of spawn while withholding only complete chunk payloads.
-			return nil
-		}
+		// Temporary isolation: public StartGame and its protocol-owned pre-spawn
+		// packets are already complete. Withhold the entire backend stream to
+		// separate those from every post-spawn gameplay packet.
+		return nil
 	}
 
 	if s.opts.SyncProtocol {
