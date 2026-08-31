@@ -12,7 +12,6 @@ import (
 	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
 	"github.com/cooldogedev/spectrum/util"
 	"github.com/sandertv/gophertunnel/minecraft"
-	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -266,7 +265,6 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 	if ctx.Cancelled() {
 		return
 	}
-	traceSpectatorServerPacket(s, pk)
 
 	if s.opts.SyncProtocol {
 		for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
@@ -325,7 +323,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 
 	pk := factory()
 	pk.Marshal(s.client.Proto().NewReader(buf, shieldID, true))
-	traceSpectatorClientPacket(s, pk)
 	if s.opts.SyncProtocol {
 		s.Processor().ProcessClient(ctx, &pk)
 		if ctx.Cancelled() {
@@ -365,50 +362,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		}
 	}
 	return
-}
-
-// traceSpectatorServerPacket is temporary production instrumentation for the
-// live faux-spectator sync. It records only the packet families that can change
-// game type, abilities, or grounded state and is removed after one capture.
-func traceSpectatorServerPacket(s *Session, pk packet.Packet) {
-	switch pk := pk.(type) {
-	case *packet.SetPlayerGameType:
-		if pk.GameType == packet.GameTypeCreative || pk.GameType == packet.GameTypeSpectator {
-			s.logger.Info("spectator packet trace", "direction", "server_to_client", "packet", "SetPlayerGameType", "game_type", pk.GameType)
-		}
-	case *packet.UpdateAbilities:
-		trace := false
-		layers := make([]string, 0, len(pk.AbilityData.Layers))
-		for _, layer := range pk.AbilityData.Layers {
-			if layer.Type == protocol.AbilityLayerTypeSpectator || layer.Values&(protocol.AbilityNoClip|protocol.AbilityFlying) != 0 {
-				trace = true
-			}
-			layers = append(layers, fmt.Sprintf("type=%d mask=%#x values=%#x fly=%.3f vertical=%.3f walk=%.3f", layer.Type, layer.Abilities, layer.Values, layer.FlySpeed, layer.VerticalFlySpeed, layer.WalkSpeed))
-		}
-		if trace {
-			s.logger.Info("spectator packet trace", "direction", "server_to_client", "packet", "UpdateAbilities", "entity_unique_id", pk.AbilityData.EntityUniqueID, "layers", layers)
-		}
-	case *packet.MovePlayer:
-		if pk.Mode == packet.MoveModeTeleport {
-			s.logger.Info("spectator packet trace", "direction", "server_to_client", "packet", "MovePlayer", "mode", pk.Mode, "on_ground", pk.OnGround, "position", pk.Position)
-		}
-	}
-}
-
-// traceSpectatorClientPacket pairs the outbound trace with the client's flight
-// response. Only explicit flight toggles are logged, not ordinary movement.
-func traceSpectatorClientPacket(s *Session, pk packet.Packet) {
-	switch pk := pk.(type) {
-	case *packet.PlayerAuthInput:
-		start, stop := pk.InputData.Load(packet.InputFlagStartFlying), pk.InputData.Load(packet.InputFlagStopFlying)
-		if start || stop {
-			s.logger.Info("spectator packet trace", "direction", "client_to_server", "packet", "PlayerAuthInput", "start_flying", start, "stop_flying", stop, "tick", pk.Tick, "position", pk.Position)
-		}
-	case *packet.RequestAbility:
-		if pk.Ability == packet.AbilityFlying {
-			s.logger.Info("spectator packet trace", "direction", "client_to_server", "packet", "RequestAbility", "ability", pk.Ability, "value", pk.Value)
-		}
-	}
 }
 
 func writeTracedClientPacket(s *Session, backend *spectrumserver.Conn, payload []byte, receivedAt time.Time) error {
