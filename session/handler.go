@@ -3,11 +3,9 @@ package session
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	spectrumserver "github.com/cooldogedev/spectrum/server"
@@ -267,14 +265,6 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 	if ctx.Cancelled() {
 		return
 	}
-	traceLegacy118Packet(s, "server_to_client", pk)
-	if legacy118TraceEnabled(s) {
-		// Temporary binary search: allow ItemRegistry, ChunkRadiusUpdated and
-		// CreativeContent, but withhold CraftingData and everything after it.
-		if s.legacy118ServerPacketSequence.Add(1) > 3 {
-			return nil
-		}
-	}
 
 	if s.opts.SyncProtocol {
 		for _, latest := range s.client.Proto().ConvertToLatest(pk, s.client) {
@@ -333,7 +323,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 
 	pk := factory()
 	pk.Marshal(s.client.Proto().NewReader(buf, shieldID, true))
-	traceLegacy118Packet(s, "client_to_server", pk)
 	if s.opts.SyncProtocol {
 		s.Processor().ProcessClient(ctx, &pk)
 		if ctx.Cancelled() {
@@ -373,70 +362,6 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		}
 	}
 	return
-}
-
-// traceLegacy118Packet is temporary production instrumentation for the
-// protocol-486 spawn crash. It is restricted to the reproducing account and a
-// bounded packet count so normal traffic is unaffected. Remove it after the
-// first successful capture.
-func traceLegacy118Packet(s *Session, direction string, pk packet.Packet) {
-	if !legacy118TraceEnabled(s) {
-		return
-	}
-	sequence := s.legacy118TraceSequence.Add(1)
-	if sequence > 128 {
-		return
-	}
-	args := []any{"sequence", sequence, "direction", direction, "packet", fmt.Sprintf("%T", pk), "packet_id", pk.ID()}
-	switch pk := pk.(type) {
-	case *packet.LevelChunk:
-		args = append(args, "chunk_x", pk.Position[0], "chunk_z", pk.Position[1], "sub_chunk_count", pk.SubChunkCount, "payload_bytes", len(pk.RawPayload))
-		if !s.legacy118ChunkPayloadDumped.Swap(true) {
-			args = append(args, "payload_base64", base64.StdEncoding.EncodeToString(pk.RawPayload))
-		}
-	case *packet.SubChunk:
-		args = append(args, "entries", len(pk.SubChunkEntries))
-	case *packet.NetworkChunkPublisherUpdate:
-		args = append(args, "position", pk.Position, "radius", pk.Radius)
-	case *packet.PlayerList:
-		args = append(args, "entries", len(pk.Entries))
-	case *packet.AddPlayer:
-		args = append(args, "username", pk.Username, "runtime_id", pk.EntityRuntimeID, "game_type", pk.GameType)
-	case *packet.SetDisplayObjective:
-		args = append(args, "display_slot", pk.DisplaySlot, "objective", pk.ObjectiveName, "display_name", pk.DisplayName)
-	case *packet.SetScore:
-		args = append(args, "entries", len(pk.Entries))
-	case *packet.ModalFormRequest:
-		args = append(args, "form_id", pk.FormID, "form_bytes", len(pk.FormData))
-	case *packet.CreativeContent:
-		args = append(args, "groups", len(pk.Groups), "items", len(pk.Items))
-	case *packet.CraftingData:
-		args = append(args, "shaped", len(pk.ShapedRecipes), "shapeless", len(pk.ShapelessRecipes), "multi", len(pk.MultiRecipes))
-	case *packet.AvailableCommands:
-		args = append(args, "commands", len(pk.Commands))
-	case *packet.InventoryContent:
-		args = append(args, "window_id", pk.WindowID, "items", len(pk.Content))
-	case *packet.PlayStatus:
-		args = append(args, "status", pk.Status)
-	case *packet.RequestChunkRadius:
-		args = append(args, "chunk_radius", pk.ChunkRadius, "max_chunk_radius", pk.MaxChunkRadius)
-	case *packet.SetLocalPlayerAsInitialised:
-		args = append(args, "runtime_id", pk.EntityRuntimeID)
-	}
-	s.logger.Info("legacy 1.18 packet trace", args...)
-}
-
-func traceLegacy118Marker(s *Session, event string, args ...any) {
-	if !legacy118TraceEnabled(s) {
-		return
-	}
-	sequence := s.legacy118TraceSequence.Add(1)
-	fields := []any{"sequence", sequence, "direction", "proxy", "event", event}
-	s.logger.Info("legacy 1.18 packet trace", append(fields, args...)...)
-}
-
-func legacy118TraceEnabled(s *Session) bool {
-	return s.client.Proto().ID() == 486 && strings.EqualFold(s.client.IdentityData().DisplayName, "kmm")
 }
 
 func writeTracedClientPacket(s *Session, backend *spectrumserver.Conn, payload []byte, receivedAt time.Time) error {
