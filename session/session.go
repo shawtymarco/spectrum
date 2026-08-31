@@ -51,11 +51,12 @@ type Session struct {
 	inFallback atomic.Bool
 	once       sync.Once
 
-	tracePrefix      uint64
-	traceSequence    atomic.Uint64
-	traceAckSequence atomic.Uint64
-	traceAckMu       sync.Mutex
-	traceAcks        map[int64]pendingTraceAck
+	tracePrefix            uint64
+	traceSequence          atomic.Uint64
+	traceAckSequence       atomic.Uint64
+	legacy118TraceSequence atomic.Uint64
+	traceAckMu             sync.Mutex
+	traceAcks              map[int64]pendingTraceAck
 }
 
 var errFallbackInProgress = errors.New("fallback already in progress")
@@ -150,15 +151,19 @@ func (s *Session) LoginContext(ctx context.Context) (err error) {
 
 	gameData := conn.GameData()
 	s.Processor().ProcessStartGame(NewContext(), &gameData)
+	traceLegacy118Marker(s, "start_game_begin", "dimension", gameData.Dimension, "game_mode", gameData.PlayerGameMode, "items", len(gameData.Items), "custom_blocks", len(gameData.CustomBlocks), "experiments", len(gameData.Experiments), "chunk_radius", gameData.ChunkRadius)
 	if err := s.client.StartGame(gameData); err != nil {
 		s.logger.Debug("startgame sequence failed", "err", err)
 		return err
 	}
+	traceLegacy118Marker(s, "start_game_complete")
 
+	traceLegacy118Marker(s, "backend_spawn_begin")
 	if err := conn.DoSpawn(); err != nil {
 		s.logger.Debug("spawn sequence failed", "err", err)
 		return err
 	}
+	traceLegacy118Marker(s, "backend_spawn_complete")
 	s.registry.AddSession(identityData.XUID, s)
 	s.logger.Info("logged in session")
 	return
