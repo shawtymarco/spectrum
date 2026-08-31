@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -376,13 +377,16 @@ func traceLegacy118Packet(s *Session, direction string, pk packet.Packet) {
 		return
 	}
 	sequence := s.legacy118TraceSequence.Add(1)
-	if sequence > 512 {
+	if sequence > 128 {
 		return
 	}
 	args := []any{"sequence", sequence, "direction", direction, "packet", fmt.Sprintf("%T", pk), "packet_id", pk.ID()}
 	switch pk := pk.(type) {
 	case *packet.LevelChunk:
 		args = append(args, "chunk_x", pk.Position[0], "chunk_z", pk.Position[1], "sub_chunk_count", pk.SubChunkCount, "payload_bytes", len(pk.RawPayload))
+		if !s.legacy118ChunkPayloadDumped.Swap(true) {
+			args = append(args, "payload_base64", base64.StdEncoding.EncodeToString(pk.RawPayload))
+		}
 	case *packet.SubChunk:
 		args = append(args, "entries", len(pk.SubChunkEntries))
 	case *packet.NetworkChunkPublisherUpdate:
