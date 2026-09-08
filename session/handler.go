@@ -181,13 +181,6 @@ loop:
 func handleClient(s *Session) {
 	header := &packet.Header{}
 	pool := s.client.Proto().Packets(true)
-	var shieldID int32
-	for _, item := range s.client.GameData().Items {
-		if item.Name == "minecraft:shield" {
-			shieldID = int32(item.RuntimeID)
-			break
-		}
-	}
 
 loop:
 	for {
@@ -209,7 +202,7 @@ loop:
 		if s.backendWaiting(backend) && !s.acknowledgementWaiting(backend) {
 			continue loop
 		}
-		if err := handleClientPacket(s, backend, header, pool, shieldID, payload, time.Now()); err != nil {
+		if err := handleClientPacket(s, backend, header, pool, s.clientShieldID.Load(), payload, time.Now()); err != nil {
 			current, backendAddr := s.backendIsCurrent(backend)
 			if !current {
 				// A transfer may retire the backend while a client packet write is

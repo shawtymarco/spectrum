@@ -50,6 +50,21 @@ Native clients retain raw packet forwarding. Historical clients automatically
 cross the bidirectional `minecraft.Protocol` conversion boundary, and the
 backend connection request carries the public client's real protocol ID.
 
+## Examples
+
+Each example is a separate executable package. Run commands from the repository
+root, such as `go run ./example/simple`, to preserve the examples' working-directory
+behavior. The resource-pack example reads `./resource_packs` relative to that
+working directory.
+
+- [Simple proxy](example/simple/main.go)
+- [Control API](example/api/main.go)
+- [Resource packs](example/resource-packs/main.go)
+- Animations: [smooth](example/animation/smooth/main.go),
+  [fade](example/animation/fade/main.go), [ease](example/animation/ease/main.go)
+- Transports: [Spectral](example/transport/spectral/main.go),
+  [QUIC](example/transport/quic/main.go)
+
 ## 🔗 Dependencies
 
 - [`shawtymarco/gophertunnel`](https://github.com/shawtymarco/gophertunnel)

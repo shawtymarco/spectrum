@@ -26,6 +26,10 @@ type Session struct {
 	cancelFunc context.CancelCauseFunc
 
 	client *minecraft.Conn
+	// clientShieldID is published from the processed initial item registry before
+	// StartGame. The client reader starts earlier to drain handshake packets and
+	// must not read the public connection's concurrently populated GameData.
+	clientShieldID atomic.Int32
 
 	serverAddr string
 	serverConn *server.Conn
@@ -161,6 +165,13 @@ func (s *Session) LoginContext(ctx context.Context) (err error) {
 
 	gameData := conn.GameData()
 	s.Processor().ProcessStartGame(NewContext(), &gameData)
+	var shieldID int32
+	for _, item := range gameData.Items {
+		if item.Name == "minecraft:shield" {
+			shieldID = int32(item.RuntimeID)
+		}
+	}
+	s.clientShieldID.Store(shieldID)
 	if err := s.client.StartGame(gameData); err != nil {
 		s.logger.Debug("startgame sequence failed", "err", err)
 		return err

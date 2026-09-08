@@ -11,7 +11,9 @@ require (
 	github.com/scylladb/go-set v1.0.2
 )
 
-replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260824230810-823172d1d90e
+replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260908071403-1a193af9c670
+
+replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260908071404-a31c870979d6
 
 require (
 	github.com/coder/websocket v1.8.14 // indirect
