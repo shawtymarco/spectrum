@@ -64,7 +64,10 @@ type Conn struct {
 	deferredPackets []any
 	expectedIds     []uint32
 
-	onConnect func(err error)
+	connectMu       sync.Mutex
+	onConnect       func(err error)
+	connectFinished bool
+	connectErr      error
 
 	connected chan struct{}
 	spawned   chan struct{}
@@ -230,8 +233,42 @@ func (c *Conn) DoConnect() error {
 }
 
 // OnConnect invokes the provided function once the connection sequence is complete or has failed.
+// Registration after completion receives the already selected outcome immediately.
 func (c *Conn) OnConnect(fn func(error)) {
+	c.connectMu.Lock()
+	if c.connectFinished {
+		err := c.connectErr
+		c.connectMu.Unlock()
+		if fn != nil {
+			fn(err)
+		}
+		return
+	}
 	c.onConnect = fn
+	c.connectMu.Unlock()
+}
+
+// finishConnect selects one terminal outcome. Callbacks run outside both the
+// callback mutex and close-once, so they may safely close this connection.
+func (c *Conn) finishConnect(err error) {
+	c.connectMu.Lock()
+	if c.connectFinished {
+		c.connectMu.Unlock()
+		return
+	}
+	if err == nil && c.ctx.Err() != nil {
+		err = context.Cause(c.ctx)
+	}
+	c.connectFinished, c.connectErr = true, err
+	fn := c.onConnect
+	c.onConnect = nil
+	if err == nil {
+		close(c.connected)
+	}
+	c.connectMu.Unlock()
+	if fn != nil {
+		fn(err)
+	}
 }
 
 // WaitConnect blocks until the connection sequence has completed or the provided context is canceled.
@@ -283,19 +320,10 @@ func (c *Conn) Close() error {
 // CloseWithError closes the underlying connection.
 func (c *Conn) CloseWithError(err error) {
 	c.once.Do(func() {
-		var connected bool
-		select {
-		case <-c.connected:
-			connected = true
-		default:
-		}
-
-		if !connected && c.onConnect != nil {
-			c.onConnect(err)
-		}
 		c.cancelFunc(err)
 		_ = c.conn.Close()
 	})
+	c.finishConnect(context.Cause(c.ctx))
 }
 
 // read reads a packet from the connection, handling decompression and decoding as necessary.
@@ -473,10 +501,7 @@ func (c *Conn) handleChunkRadiusUpdated(pk *packet.ChunkRadiusUpdated) error {
 // it responds to the server with a packet.SetLocalPlayerAsInitialised to finalize the connection sequence and spawn the player.
 func (c *Conn) handlePlayStatus(pk *packet.PlayStatus) error {
 	c.logger.Debug("received play_status, finalizing connection sequence")
-	close(c.connected)
-	if c.onConnect != nil {
-		c.onConnect(nil)
-	}
+	c.finishConnect(nil)
 	return nil
 }
 
