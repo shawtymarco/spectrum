@@ -68,8 +68,8 @@ github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6 h1:Oj7QsiwWT
 github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6/go.mod h1:/yysjwfCXm2+2OY8mBazLzcxJ3irnylKCyG3FLgUPVU=
 github.com/scylladb/go-set v1.0.2 h1:SkvlMCKhP0wyyct6j+0IHJkBkSZL+TDzZ4E7f7BCcRE=
 github.com/scylladb/go-set v1.0.2/go.mod h1:DkpGd78rljTxKAnTDPFqXSGxvETQnJyuSOQwsHycqfs=
-github.com/shawtymarco/gophertunnel v1.57.1-0.20260908071403-1a193af9c670 h1:8Xmi2LMlSMjtT49yuAxshQCstFPFtythhM0+sAxPKvU=
-github.com/shawtymarco/gophertunnel v1.57.1-0.20260908071403-1a193af9c670/go.mod h1:JMKsf8DmVmn+qEVJ1IA9m7zEo9qHJ3ZN6IEvySEk9bs=
+github.com/shawtymarco/gophertunnel v1.57.1-0.20260919101632-057c4218966d h1:iHqzihuGv27wlIAx1Cn4rpFblUg/DBR3K7IyndPJg+I=
+github.com/shawtymarco/gophertunnel v1.57.1-0.20260919101632-057c4218966d/go.mod h1:JMKsf8DmVmn+qEVJ1IA9m7zEo9qHJ3ZN6IEvySEk9bs=
 github.com/shawtymarco/spectral v0.0.0-20260908071404-a31c870979d6 h1:7uGMPK7E+9b8/Hm/fUQHwXI+3fLRA3jwX0AJH+rFJUg=
 github.com/shawtymarco/spectral v0.0.0-20260908071404-a31c870979d6/go.mod h1:Oq9dVLgqaRiS/hZvKvLk/XWXFOZmmTKM29u6o4GBe84=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

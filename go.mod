@@ -6,12 +6,13 @@ require (
 	github.com/cooldogedev/spectral v0.0.5
 	github.com/go-gl/mathgl v1.2.0
 	github.com/golang/snappy v1.0.0
+	github.com/google/uuid v1.6.0
 	github.com/quic-go/quic-go v0.60.0
 	github.com/sandertv/gophertunnel v1.57.1
 	github.com/scylladb/go-set v1.0.2
 )
 
-replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260908071403-1a193af9c670
+replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260919101632-057c4218966d
 
 replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260908071404-a31c870979d6
 
@@ -23,7 +24,6 @@ require (
 	github.com/df-mc/go-xsapi/v2 v2.0.3 // indirect
 	github.com/df-mc/jsonc v1.0.5 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.5 // indirect
