@@ -51,6 +51,12 @@ loop:
 			continue loop
 		}
 
+		if current, _ := s.backendIsCurrent(server); !current {
+			// Replacement can complete while ReadPacket is in flight. A
+			// successful old read is just as retired as an old read error.
+			continue loop
+		}
+
 		switch pk := pk.(type) {
 		case *spectrumpacket.Flush:
 			if s.backendWaiting(server) {
@@ -146,12 +152,13 @@ loop:
 			if shouldDiscardServerPacket(s.client.Proto(), pk) {
 				continue loop
 			}
-			if err := handleServerPacket(s, pk); err != nil {
+			forwarded, err := handleServerPacket(s, server, pk)
+			if err != nil {
 				s.CloseWithError(fmt.Errorf("failed to write packet to client: %w", err))
 				logError(s, "failed to write packet to client", err)
 				break loop
 			}
-			if _, ok := pk.(*packet.LevelChunk); ok {
+			if _, ok := pk.(*packet.LevelChunk); ok && forwarded {
 				s.completeReadyTransfer(server)
 			}
 		case []byte:
@@ -159,18 +166,13 @@ loop:
 				continue loop
 			}
 			packetID, packetIDOK := encodedPacketID(pk)
-			ctx := NewContext()
-			s.Processor().ProcessServerEncoded(ctx, &pk)
-			if ctx.Cancelled() {
-				continue loop
-			}
-
-			if _, err := s.client.Write(pk); err != nil {
+			forwarded, err := handleEncodedServerPacket(s, server, pk)
+			if err != nil {
 				s.CloseWithError(fmt.Errorf("failed to write packet to client: %w", err))
 				logError(s, "failed to write packet to client", err)
 				break loop
 			}
-			if packetIDOK && packetID == packet.IDLevelChunk {
+			if forwarded && packetIDOK && packetID == packet.IDLevelChunk {
 				s.completeReadyTransfer(server)
 			}
 		}
@@ -254,11 +256,22 @@ loop:
 }
 
 // handleServerPacket processes and forwards the provided packet from the server to the client.
-func handleServerPacket(s *Session, pk packet.Packet) (err error) {
+func handleServerPacket(s *Session, backend *spectrumserver.Conn, pk packet.Packet) (bool, error) {
+	if current, _ := s.backendIsCurrent(backend); !current {
+		return false, nil
+	}
 	ctx := NewContext()
 	s.Processor().ProcessServer(ctx, &pk)
 	if ctx.Cancelled() {
-		return
+		return false, nil
+	}
+	// Callbacks may start a transfer, so check again after they return. Hold
+	// ownership through tracking and enqueueing to order the packet before any
+	// replacement publication and its destination-state reset.
+	s.serverMu.RLock()
+	defer s.serverMu.RUnlock()
+	if s.serverConn != backend {
+		return false, nil
 	}
 
 	if s.opts.SyncProtocol {
@@ -268,7 +281,26 @@ func handleServerPacket(s *Session, pk packet.Packet) (err error) {
 	} else {
 		s.tracker.handlePacket(pk)
 	}
-	return s.client.WritePacket(pk)
+	err := s.client.WritePacket(pk)
+	return err == nil, err
+}
+
+func handleEncodedServerPacket(s *Session, backend *spectrumserver.Conn, payload []byte) (bool, error) {
+	if current, _ := s.backendIsCurrent(backend); !current {
+		return false, nil
+	}
+	ctx := NewContext()
+	s.Processor().ProcessServerEncoded(ctx, &payload)
+	if ctx.Cancelled() {
+		return false, nil
+	}
+	s.serverMu.RLock()
+	defer s.serverMu.RUnlock()
+	if s.serverConn != backend {
+		return false, nil
+	}
+	_, err := s.client.Write(payload)
+	return err == nil, err
 }
 
 // handleClientPacket processes and forwards the provided packet from the client to the server.
