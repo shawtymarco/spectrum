@@ -8,13 +8,13 @@ require (
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
 	github.com/quic-go/quic-go v0.60.0
-	github.com/sandertv/gophertunnel v1.57.1
+	github.com/sandertv/gophertunnel v1.62.0
 	github.com/scylladb/go-set v1.0.2
 )
 
-replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260919101632-057c4218966d
+replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260920121432-bb499bd61306
 
-replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260908071404-a31c870979d6
+replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260910165855-64f0788a8ea5
 
 require (
 	github.com/coder/websocket v1.8.14 // indirect
