@@ -70,8 +70,8 @@ github.com/scylladb/go-set v1.0.2 h1:SkvlMCKhP0wyyct6j+0IHJkBkSZL+TDzZ4E7f7BCcRE
 github.com/scylladb/go-set v1.0.2/go.mod h1:DkpGd78rljTxKAnTDPFqXSGxvETQnJyuSOQwsHycqfs=
 github.com/shawtymarco/gophertunnel v1.57.1-0.20260920121432-bb499bd61306 h1:9b+ZBqK/bKZKg4O5UROPLknlgJBCNuGdCKeXnNFCFsM=
 github.com/shawtymarco/gophertunnel v1.57.1-0.20260920121432-bb499bd61306/go.mod h1:JMKsf8DmVmn+qEVJ1IA9m7zEo9qHJ3ZN6IEvySEk9bs=
-github.com/shawtymarco/spectral v0.0.0-20260910165855-64f0788a8ea5 h1:1RKmi49GZOIaNkniEqeB3x3jhnMhuD9BlANExtFv/c0=
-github.com/shawtymarco/spectral v0.0.0-20260910165855-64f0788a8ea5/go.mod h1:Oq9dVLgqaRiS/hZvKvLk/XWXFOZmmTKM29u6o4GBe84=
+github.com/shawtymarco/spectral v0.0.0-20260920155624-33c15697d1d2 h1:8JV5f530yzw81anlMYwIUdC5TGD2Trpt7Hcf4euvmfA=
+github.com/shawtymarco/spectral v0.0.0-20260920155624-33c15697d1d2/go.mod h1:Oq9dVLgqaRiS/hZvKvLk/XWXFOZmmTKM29u6o4GBe84=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=

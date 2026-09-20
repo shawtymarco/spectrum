@@ -14,7 +14,7 @@ require (
 
 replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20260920121432-bb499bd61306
 
-replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260910165855-64f0788a8ea5
+replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260920155624-33c15697d1d2
 
 require (
 	github.com/coder/websocket v1.8.14 // indirect
