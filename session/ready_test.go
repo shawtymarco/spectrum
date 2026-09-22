@@ -73,6 +73,23 @@ func TestBackendReadyStartsAuthoritativeStreaming(t *testing.T) {
 	}
 }
 
+func TestOrdinaryLoginMayPublishApplicationReadiness(t *testing.T) {
+	s := new(Session)
+	if err := s.markBackendReady(new(server.Conn)); err != nil {
+		t.Fatal("ordinary login ready marker disconnected the backend", err)
+	}
+	if s.ready != nil {
+		t.Fatal("ordinary login installed a transfer barrier")
+	}
+}
+
+func TestUnrelatedBackendCannotReleaseReadinessBarrier(t *testing.T) {
+	s := &Session{ready: &readyTransfer{backend: new(server.Conn), phase: readyTransferWaiting}}
+	if err := s.markBackendReady(new(server.Conn)); err == nil || s.ready.phase != readyTransferWaiting {
+		t.Fatal("wrong backend released readiness")
+	}
+}
+
 func TestReadyTimeoutCoversStreamingPhase(t *testing.T) {
 	backend := new(server.Conn)
 	s := &Session{ready: &readyTransfer{backend: backend, phase: readyTransferStreaming}}

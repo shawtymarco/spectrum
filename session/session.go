@@ -381,7 +381,13 @@ func (s *Session) installReadyTransfer(backend *server.Conn, origin, target stri
 func (s *Session) markBackendReady(backend *server.Conn) error {
 	s.readyMu.Lock()
 	state := s.ready
-	if state == nil || state.backend != backend {
+	// A backend can publish its application-ready marker on both initial
+	// login and transfer. Ordinary connections need no animation barrier.
+	if state == nil {
+		s.readyMu.Unlock()
+		return nil
+	}
+	if state.backend != backend {
 		s.readyMu.Unlock()
 		return errors.New("backend ready received without a pending transfer")
 	}
