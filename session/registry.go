@@ -46,6 +46,17 @@ func (r *Registry) RemoveSession(xuid string) {
 	delete(r.sessions, xuid)
 }
 
+// RemoveSessionIfCurrent retires one connection without removing a newer login
+// for the same account. A failed login was never registered and must not remove
+// the account's existing session either.
+func (r *Registry) RemoveSessionIfCurrent(xuid string, session *Session) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sessions[xuid] == session {
+		delete(r.sessions, xuid)
+	}
+}
+
 func (r *Registry) GetSessions() []*Session {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

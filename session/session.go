@@ -557,7 +557,7 @@ func (s *Session) CloseWithError(err error) {
 			conn.CloseWithError(err)
 		}
 		s.cancelFunc(err)
-		s.registry.RemoveSession(s.client.IdentityData().XUID)
+		s.registry.RemoveSessionIfCurrent(s.client.IdentityData().XUID, s)
 		s.logger.Info("closed session", "err", err)
 	})
 }
