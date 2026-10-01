@@ -248,11 +248,19 @@ loop:
 			s.CloseWithError(context.Cause(s.ctx))
 			break loop
 		case <-ticker.C:
-			if err := s.Server().WritePacket(&spectrumpacket.Latency{Latency: s.client.Latency().Milliseconds() * 2, Timestamp: time.Now().UnixMilli()}); err != nil {
+			if err := s.writeLatency(); err != nil {
 				logError(s, "failed to write latency packet", err)
 			}
 		}
 	}
+}
+
+func (s *Session) writeLatency() error {
+	backend := s.Server()
+	if !backend.Spawned() {
+		return nil
+	}
+	return backend.WritePacket(&spectrumpacket.Latency{Latency: s.client.Latency().Milliseconds() * 2, Timestamp: time.Now().UnixMilli()})
 }
 
 // handleServerPacket processes and forwards the provided packet from the server to the client.
@@ -335,6 +343,9 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		}
 		s.Processor().ProcessClientEncoded(ctx, &payload)
 		if !ctx.Cancelled() {
+			if !backend.Spawned() {
+				return nil
+			}
 			if ctx.trace() {
 				return writeTracedClientPacket(s, backend, payload, receivedAt)
 			}
@@ -361,6 +372,9 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		if ctx.Cancelled() {
 			return
 		}
+		if !backend.Spawned() {
+			return nil
+		}
 		if latency, ok := pk.(*packet.NetworkStackLatency); ok {
 			if ack, matched := s.completeTraceAcknowledgement(latency.Timestamp); matched {
 				s.Processor().ProcessTraceAck(NewContext(), ack)
@@ -383,6 +397,9 @@ func handleClientPacket(s *Session, backend *spectrumserver.Conn, header *packet
 		s.Processor().ProcessClient(ctx, &latest)
 		if ctx.Cancelled() {
 			break
+		}
+		if !backend.Spawned() {
+			continue
 		}
 		if latency, ok := latest.(*packet.NetworkStackLatency); ok {
 			if ack, matched := s.completeTraceAcknowledgement(latency.Timestamp); matched {

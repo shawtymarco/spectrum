@@ -291,8 +291,22 @@ func (c *Conn) DoSpawn() error {
 		return context.Cause(c.ctx)
 	default:
 	}
+	if err := c.WritePacket(&packet.SetLocalPlayerAsInitialised{EntityRuntimeID: c.runtimeID}); err != nil {
+		return err
+	}
 	close(c.spawned)
-	return c.WritePacket(&packet.SetLocalPlayerAsInitialised{EntityRuntimeID: c.runtimeID})
+	return nil
+}
+
+// Spawned reports whether the bootstrap and spawn request have been written.
+// Ordinary input and latency must never precede those packets on a new stream.
+func (c *Conn) Spawned() bool {
+	select {
+	case <-c.spawned:
+		return c.ctx.Err() == nil
+	default:
+		return false
+	}
 }
 
 // GameData returns the game data set for the connection by the StartGame packet.

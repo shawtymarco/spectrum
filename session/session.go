@@ -227,7 +227,6 @@ func (s *Session) transferContext(ctx context.Context, addr string, waitForReady
 		return errors.New("processor failed")
 	}
 
-	s.sendMetadata(true)
 	conn, err := s.dial(ctx, addr)
 	if err != nil {
 		s.Processor().ProcessTransferFailure(NewContext(), &origin, &addr, err)
@@ -235,9 +234,11 @@ func (s *Session) transferContext(ctx context.Context, addr string, waitForReady
 	}
 
 	if err := conn.DoConnect(); err != nil {
+		conn.CloseWithError(err)
 		s.Processor().ProcessTransferFailure(NewContext(), &origin, &addr, err)
 		return fmt.Errorf("connection sequence failed failed: %w", err)
 	}
+	s.sendMetadata(true)
 
 	conn.OnConnect(func(err error) {
 		if err != nil {
