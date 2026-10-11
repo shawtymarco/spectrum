@@ -6,23 +6,19 @@
 
 <p align="center">A fast Minecraft Bedrock proxy with native-backend multiversion support.</p>
 
-## ✅ Supported Versions
+See the isolated [dual public transport candidate](docs/dual-transport.md) for
+RakNet/NetherNet composition, dependency prerequisites and validation limits.
 
-This maintained fork keeps the backend wire native and accepts the verified
-`go-multiversion` adapters below.
+## Compatibility status
 
-| Protocol ID | Minecraft version | Path | BRBW automated E2E |
-|------------:|-------------------|------|:------------------:|
-| 2169 | 1.26.45 | Native gophertunnel | ✅ |
-| 2168 | 1.26.40-1.26.44 | `go-multiversion/v1_26_44` | ✅ |
-| 1001 | 1.26.30-1.26.34, 1.26.36 | `go-multiversion/v1_26_30` | ✅ |
-| 975 | 1.26.20, 1.26.21, 1.26.23 | `go-multiversion/v1_26_20` | ✅ |
-| 844 | 1.21.110-1.21.114 | `go-multiversion/v1_21_110` | ✅ |
-| 827 | 1.21.100-1.21.102 | `go-multiversion/v1_21_100` | ✅ |
-| 486 | 1.18.10-1.18.12 | `go-multiversion/v1_18_10` | ✅ |
+This isolated branch uses published native 2223 APIs and validates native 2225
+through the candidate overrides documented above. The new dual-listener path
+requires the accompanying gophertunnel fixes before it can use published pins.
+Preview registries and Mojang-client validation remain outstanding.
 
-> [!NOTE]
-> Version coverage is explicit. Unlisted releases and previews are not implied.
+The consumer supplies its explicit registry-aware `go-multiversion` catalogue;
+Spectrum keeps the backend wire native. Automated transport tests do not expand
+production version coverage or imply support for unlisted releases.
 
 ## 🚀 Usage
 

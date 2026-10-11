@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"slices"
 	"sync"
 
 	"github.com/cooldogedev/spectrum/protocol"
 	spectrumpacket "github.com/cooldogedev/spectrum/server/packet"
+	"github.com/df-mc/go-nethernet"
 	"github.com/golang/snappy"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -23,6 +25,15 @@ const (
 	packetDecodeNotNeeded
 	packetTraceVersion = 1
 )
+
+// Retain the existing ConnectionRequest layout. Only opaque transport addresses
+// use a tagged URI; ICE candidates must not masquerade as an authenticated IP.
+func publicAddress(addr net.Addr) string {
+	if n, ok := addr.(*nethernet.Addr); ok {
+		return fmt.Sprintf("nethernet://%s/%d", n.NetworkID, n.ConnectionID)
+	}
+	return addr.String()
+}
 
 var bufferPool = sync.Pool{
 	New: func() any {
@@ -215,7 +226,7 @@ func (c *Conn) DoConnect() error {
 	}
 
 	err = c.WritePacket(&spectrumpacket.ConnectionRequest{
-		Addr: c.client.RemoteAddr().String(),
+		Addr: publicAddress(c.client.RemoteAddr()),
 		// The backend wire may deliberately remain native while the public
 		// client uses a historical protocol. Forward the selected client
 		// protocol so a backend can choose presentation capabilities such as

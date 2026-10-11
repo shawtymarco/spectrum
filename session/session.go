@@ -55,6 +55,7 @@ type Session struct {
 	cache      atomic.Value
 	latency    atomic.Int64
 	inFallback atomic.Bool
+	loggedIn   atomic.Bool
 	once       sync.Once
 
 	tracePrefix      uint64
@@ -62,6 +63,7 @@ type Session struct {
 	traceAckSequence atomic.Uint64
 	traceAckMu       sync.Mutex
 	traceAcks        map[int64]pendingTraceAck
+	loginSequence    uint64
 }
 
 var errFallbackInProgress = errors.New("fallback already in progress")
@@ -114,6 +116,7 @@ func NewSession(client *minecraft.Conn, logger *slog.Logger, registry *Registry,
 		traceAcks:   make(map[int64]pendingTraceAck),
 	}
 	s.ctx, s.cancelFunc = context.WithCancelCause(client.Context())
+	s.loginSequence = registry.sequence.Add(1)
 	s.cache.Store([]byte(nil))
 	return s
 }
@@ -136,7 +139,10 @@ func (s *Session) LoginTimeout(duration time.Duration) (err error) {
 // establishing a connection, and spawning the player in the game. The process is performed
 // using the provided context for cancellation.
 func (s *Session) LoginContext(ctx context.Context) (err error) {
-	identityData := s.client.IdentityData()
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	defer cancel()
 	serverAddr, err := s.discovery.Discover(s.client)
 	if err != nil {
 		s.logger.Debug("discovery failed", "err", err)
@@ -172,7 +178,7 @@ func (s *Session) LoginContext(ctx context.Context) (err error) {
 		}
 	}
 	s.clientShieldID.Store(shieldID)
-	if err := s.client.StartGame(gameData); err != nil {
+	if err := s.client.StartGameContext(ctx, gameData); err != nil {
 		s.logger.Debug("startgame sequence failed", "err", err)
 		return err
 	}
@@ -181,7 +187,10 @@ func (s *Session) LoginContext(ctx context.Context) (err error) {
 		s.logger.Debug("spawn sequence failed", "err", err)
 		return err
 	}
-	s.registry.AddSession(identityData.XUID, s)
+	if err := s.registry.register(s); err != nil {
+		return err
+	}
+	s.loggedIn.Store(true)
 	s.logger.Info("logged in session")
 	return
 }
@@ -550,6 +559,7 @@ func (s *Session) Close() (err error) {
 
 func (s *Session) CloseWithError(err error) {
 	s.once.Do(func() {
+		s.cancelFunc(err)
 		message := err.Error()
 		s.Processor().ProcessDisconnection(NewContext(), &message)
 		_ = s.client.WritePacket(&packet.Disconnect{Message: message})
@@ -557,8 +567,7 @@ func (s *Session) CloseWithError(err error) {
 		if conn := s.Server(); conn != nil {
 			conn.CloseWithError(err)
 		}
-		s.cancelFunc(err)
-		s.registry.RemoveSessionIfCurrent(s.client.IdentityData().XUID, s)
+		s.registry.RemoveSessionIfCurrent(s.accountKey(), s)
 		s.logger.Info("closed session", "err", err)
 	})
 }
@@ -585,6 +594,11 @@ func (s *Session) dial(ctx context.Context, addr string) (*server.Conn, error) {
 	// read loop uses this pointer change to distinguish an intentional transfer
 	// from a backend failure that should trigger fallback.
 	s.serverMu.Lock()
+	if s.ctx.Err() != nil {
+		s.serverMu.Unlock()
+		_ = c.Close()
+		return nil, context.Cause(s.ctx)
+	}
 	previous := s.serverConn
 	s.serverAddr = addr
 	s.serverConn = c

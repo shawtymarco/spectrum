@@ -37,6 +37,12 @@ loop:
 				s.logger.Debug("retired backend stream closed during transfer", "err", err)
 				continue loop
 			}
+			if !s.loggedIn.Load() {
+				// Initial LoginContext owns this bootstrap. Retrying fallback
+				// here would compete with it and can spin on rejected handshakes.
+				s.CloseWithError(fmt.Errorf("initial backend handshake failed: %w", err))
+				break loop
+			}
 
 			s.logger.Warn("active backend stream read failed; attempting fallback", "backend", backendAddr, "err", err)
 			server.CloseWithError(fmt.Errorf("failed to read packet from server: %w", err))
