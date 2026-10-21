@@ -15,7 +15,7 @@ require (
 	github.com/scylladb/go-set v1.0.2
 )
 
-replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20261001043402-4ea1495a39f2
+replace github.com/sandertv/gophertunnel => github.com/shawtymarco/gophertunnel v1.57.1-0.20261011160103-4d6bffd4ed49
 
 replace github.com/cooldogedev/spectral => github.com/shawtymarco/spectral v0.0.0-20260920155624-33c15697d1d2
 
